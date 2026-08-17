@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+*.tsbuildinfo
+
+# Environment files (keep examples committed)
+.env*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+backend/temp/datasets/*
+!backend/temp/datasets/.gitkeep
+
+# Editors and operating systems
+.qa/
+.idea/
+.vscode/
+.DS_Store
