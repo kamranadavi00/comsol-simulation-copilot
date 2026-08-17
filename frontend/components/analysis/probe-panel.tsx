@@ -15,8 +15,8 @@ export function ProbePanel({
     <Panel
       action={
         <div className="flex items-center gap-1">
-          <button aria-label="Previous sampled point" className="grid h-9 w-9 place-items-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white" onClick={() => onStep(-1)} type="button"><StepBack size={15} /></button>
-          <button aria-label="Next sampled point" className="grid h-9 w-9 place-items-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white" onClick={() => onStep(1)} type="button"><StepForward size={15} /></button>
+          <button aria-label="Previous sampled point" className="grid h-9 w-9 place-items-center rounded-md text-[#567184] hover:bg-[#eaf3f8] hover:text-[#0b5f9e]" onClick={() => onStep(-1)} type="button"><StepBack size={15} /></button>
+          <button aria-label="Next sampled point" className="grid h-9 w-9 place-items-center rounded-md text-[#567184] hover:bg-[#eaf3f8] hover:text-[#0b5f9e]" onClick={() => onStep(1)} type="button"><StepForward size={15} /></button>
         </div>
       }
       eyebrow="Selection"
@@ -25,24 +25,24 @@ export function ProbePanel({
       {point ? (
         <div className="grid gap-4 p-4 sm:grid-cols-2">
           <div>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Coordinates · row {point.rowIndex}</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[#567184]">Coordinates · row {point.rowIndex}</p>
             <dl className="space-y-1.5 text-sm">
               {Object.entries(point.location).map(([axis, value]) => (
-                <div className="flex justify-between gap-4" key={axis}><dt className="uppercase text-slate-500">{axis}</dt><dd className="font-mono text-slate-200">{formatNumber(value)}</dd></div>
+                <div className="flex justify-between gap-4" key={axis}><dt className="uppercase text-[#567184]">{axis}</dt><dd className="font-mono font-medium text-[#16324a]">{formatNumber(value)}</dd></div>
               ))}
             </dl>
           </div>
           <div>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Scalar values</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[#567184]">Scalar values</p>
             <dl className="max-h-28 space-y-1.5 overflow-auto text-sm">
               {Object.entries(point.values).map(([field, value]) => (
-                <div className="flex justify-between gap-4" key={field}><dt className="truncate text-slate-500">{field}</dt><dd className="font-mono text-slate-200">{formatNumber(value)}</dd></div>
+                <div className="flex justify-between gap-4" key={field}><dt className="truncate text-[#567184]">{field}</dt><dd className="font-mono font-medium text-[#16324a]">{formatNumber(value)}</dd></div>
               ))}
             </dl>
           </div>
         </div>
       ) : (
-        <div className="flex min-h-32 items-center gap-3 p-4 text-sm text-slate-500"><Crosshair size={18} /> Select a point in the viewer to inspect exact values.</div>
+        <div className="flex min-h-32 items-center gap-3 p-4 text-sm text-[#567184]"><Crosshair className="text-[#0b7bb5]" size={18} /> Select a point in the viewer to inspect exact values.</div>
       )}
     </Panel>
   );

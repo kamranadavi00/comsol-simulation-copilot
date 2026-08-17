@@ -3,14 +3,25 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+  --workspace: #f3f7fa;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --border: #d7e2ea;
+  --ink: #16324a;
+  --muted: #567184;
+  --blue: #0b5f9e;
+  --cyan: #0b9fc2;
+  --teal: #0f7f8c;
+  --orange: #bd5220;
 }
 
 body {
   margin: 0;
-  background: #071016;
-  color: #e5edf2;
+  background: var(--workspace);
+  color: var(--ink);
   font-family: var(--font-sans, Inter), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -24,7 +35,8 @@ select {
 }
 
 ::selection {
-  background: rgb(45 212 191 / 0.3);
+  background: rgb(11 159 194 / 0.22);
+  color: #0b3558;
 }
 
 ::-webkit-scrollbar {
@@ -35,8 +47,17 @@ select {
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
-  background: #334155;
+  background: #a9bdca;
   background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #829ead;
+  background-clip: padding-box;
+}
+
+:focus-visible {
+  outline-color: var(--cyan);
 }
 
 @media (prefers-reduced-motion: reduce) {

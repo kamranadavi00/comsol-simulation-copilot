@@ -68,7 +68,7 @@ export function AssistantPanel({
 
   return (
     <Panel
-      action={<span className="flex items-center gap-1.5 rounded-full border border-teal-500/20 bg-teal-400/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-teal-300"><Sparkles size={11} />kami</span>}
+      action={<span className="flex items-center gap-1.5 rounded-full border border-[#b9d8e5] bg-[#eaf6fa] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#0b6f9f]"><Sparkles size={11} />kami</span>}
       className="flex min-h-[520px] flex-col overflow-hidden lg:h-full"
       eyebrow="Structured actions"
       title="Simulation assistant"
@@ -76,39 +76,39 @@ export function AssistantPanel({
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
         {messages.map((message) => (
           <div className={`flex gap-2.5 ${message.role === "user" ? "flex-row-reverse" : ""}`} key={message.id}>
-            <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${message.role === "user" ? "bg-slate-700 text-slate-200" : "bg-teal-400/15 text-teal-300"}`}>
+            <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${message.role === "user" ? "bg-[#dce8ef] text-[#24465f]" : "bg-[#dff3f7] text-[#0b7188]"}`}>
               {message.role === "user" ? <User size={14} /> : <Bot size={14} />}
             </span>
             <p className={`max-w-[85%] rounded-lg px-3 py-2 text-sm leading-6 ${
               message.role === "user"
-                ? "bg-slate-700 text-slate-100"
+                ? "bg-[#0b5f9e] text-white shadow-sm"
                 : message.error
-                  ? "border border-rose-500/30 bg-rose-500/10 text-rose-200"
-                  : "border border-slate-800 bg-slate-950/50 text-slate-300"
+                  ? "border border-[#e5b5ad] bg-[#fff2ef] text-[#9b3528]"
+                  : "border border-[#d7e2ea] bg-[#f8fafc] text-[#294b63]"
             }`}>{message.content}</p>
           </div>
         ))}
-        {isSending && <p className="ml-10 animate-pulse text-xs text-teal-400">Interpreting command…</p>}
+        {isSending && <p className="ml-10 animate-pulse text-xs text-[#0f7f8c]">Interpreting command…</p>}
       </div>
-      <div className="border-t border-slate-800 p-3">
+      <div className="border-t border-[#d7e2ea] bg-[#fbfdfe] p-3">
         <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
           {suggestions.map((suggestion) => (
-            <button className="shrink-0 rounded-full border border-slate-700 px-2.5 py-1.5 text-[10px] text-slate-400 hover:border-slate-500 hover:text-slate-200" disabled={disabled || isSending} key={suggestion} onClick={() => void submit(suggestion)} type="button">{suggestion}</button>
+            <button className="shrink-0 rounded-full border border-[#c6d5df] bg-white px-2.5 py-1.5 text-[10px] text-[#567184] hover:border-[#73abc3] hover:bg-[#eef7fa] hover:text-[#0b5f9e]" disabled={disabled || isSending} key={suggestion} onClick={() => void submit(suggestion)} type="button">{suggestion}</button>
           ))}
         </div>
         <form className="flex gap-2" onSubmit={handleSubmit}>
           <label className="sr-only" htmlFor="assistant-command">Simulation command</label>
           <input
-            className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-teal-500"
+            className="min-h-11 min-w-0 flex-1 rounded-lg border border-[#b9cbd7] bg-white px-3 text-sm text-[#16324a] outline-none placeholder:text-[#8ca0ad] focus:border-[#0b8fb4] focus:ring-2 focus:ring-[#0b9fc2]/10"
             disabled={disabled || isSending}
             id="assistant-command"
             onChange={(event) => setInput(event.target.value)}
             placeholder="Ask about this simulation…"
             value={input}
           />
-          <button aria-label="Send command" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-teal-400 text-slate-950 hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-40" disabled={disabled || isSending || !input.trim()} type="submit"><Send size={17} /></button>
+          <button aria-label="Send command" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#0b5f9e] text-white shadow-sm hover:bg-[#084d82] focus-visible:ring-2 focus-visible:ring-[#0b9fc2] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40" disabled={disabled || isSending || !input.trim()} type="submit"><Send size={17} /></button>
         </form>
-        <p className="mt-2 text-[10px] leading-4 text-slate-600">AI selects actions only. Python calculates all scientific values.</p>
+        <p className="mt-2 text-[10px] leading-4 text-[#7b919f]">AI selects actions only. Python calculates all scientific values.</p>
       </div>
     </Panel>
   );

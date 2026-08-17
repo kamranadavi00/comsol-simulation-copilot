@@ -1,11 +1,11 @@
 import type { PointData, SelectedPoint, Threshold } from "@/types/datasets";
 
-const VIRIDIS: Array<[number, number, number]> = [
-  [68, 1, 84],
-  [59, 82, 139],
-  [33, 145, 140],
-  [94, 201, 98],
-  [253, 231, 37],
+const SCIENTIFIC_SCALE: Array<[number, number, number]> = [
+  [18, 74, 148],
+  [35, 133, 183],
+  [83, 190, 198],
+  [244, 174, 62],
+  [211, 64, 54],
 ];
 
 export function finiteRange(values: Array<number | null>): [number, number] {
@@ -18,11 +18,11 @@ export function finiteRange(values: Array<number | null>): [number, number] {
 
 export function scalarColor(value: number, min: number, max: number, alpha = 1): string {
   const normalized = Math.max(0, Math.min(1, (value - min) / (max - min || 1)));
-  const scaled = normalized * (VIRIDIS.length - 1);
-  const index = Math.min(VIRIDIS.length - 2, Math.floor(scaled));
+  const scaled = normalized * (SCIENTIFIC_SCALE.length - 1);
+  const index = Math.min(SCIENTIFIC_SCALE.length - 2, Math.floor(scaled));
   const fraction = scaled - index;
-  const start = VIRIDIS[index];
-  const end = VIRIDIS[index + 1];
+  const start = SCIENTIFIC_SCALE[index];
+  const end = SCIENTIFIC_SCALE[index + 1];
   const rgb = start.map((channel, channelIndex) =>
     Math.round(channel + (end[channelIndex] - channel) * fraction),
   );

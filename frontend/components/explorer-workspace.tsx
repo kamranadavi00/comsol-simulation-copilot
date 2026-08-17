@@ -191,14 +191,14 @@ export function ExplorerWorkspace() {
   }
 
   return (
-    <main className="min-h-screen bg-[#071016]">
-      <header className="border-b border-slate-800 bg-[#09131a]/95 px-4 py-3 backdrop-blur md:px-6">
+    <main className="min-h-screen bg-[#f3f7fa] text-[#16324a]">
+      <header className="border-b border-[#d2e0e8] bg-white/95 px-4 py-3 shadow-[0_1px_8px_rgba(22,50,74,0.04)] backdrop-blur md:px-6">
         <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-lg border border-teal-400/20 bg-teal-400/10 text-teal-300"><Orbit size={21} /></span>
-            <div><h1 className="text-sm font-bold tracking-wide text-slate-100 sm:text-base">COMSOL AI Results Explorer</h1><p className="hidden text-[10px] uppercase tracking-[0.18em] text-slate-500 sm:block">Deterministic scientific workspace</p></div>
+            <span className="relative grid h-10 w-10 place-items-center overflow-hidden rounded-lg bg-[#0b5f9e] text-white shadow-sm"><span className="absolute bottom-0 left-0 h-1 w-full bg-[#19a9c5]" /><Orbit size={21} /></span>
+            <div><h1 className="text-sm font-bold tracking-wide text-[#153851] sm:text-base">COMSOL AI Results Explorer</h1><p className="hidden text-[10px] font-medium uppercase tracking-[0.18em] text-[#6c8494] sm:block">Deterministic scientific workspace</p></div>
           </div>
-          <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${connection === "connected" ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : connection === "disconnected" ? "border-rose-500/20 bg-rose-500/10 text-rose-300" : "border-amber-500/20 bg-amber-500/10 text-amber-300"}`}>
+          <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${connection === "connected" ? "border-[#b5ddd9] bg-[#edf8f6] text-[#176c67]" : connection === "disconnected" ? "border-[#e9bbb4] bg-[#fff1ef] text-[#a43d30]" : "border-[#eed4af] bg-[#fff8ed] text-[#9b5b19]"}`}>
             {connection === "checking" ? <Loader2 className="animate-spin" size={13} /> : connection === "connected" ? <Wifi size={13} /> : <WifiOff size={13} />}
             {connection === "checking" ? "Checking backend" : connection === "connected" ? "Backend connected" : "Backend offline"}
           </div>
@@ -207,7 +207,7 @@ export function ExplorerWorkspace() {
 
       <div className="mx-auto max-w-[1600px] space-y-4 p-4 md:p-6">
         {(error || notice) && (
-          <div className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${error ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-200"}`} role={error ? "alert" : "status"}>
+          <div className={`flex items-start gap-2 rounded-lg border bg-white px-4 py-3 text-sm shadow-sm ${error ? "border-[#e8b5ad] text-[#9b3528]" : "border-[#b5ddd9] text-[#176c67]"}`} role={error ? "alert" : "status"}>
             {error ? <CircleAlert className="mt-0.5 shrink-0" size={16} /> : <CheckCircle2 className="mt-0.5 shrink-0" size={16} />}{error ?? notice}
           </div>
         )}
@@ -215,12 +215,12 @@ export function ExplorerWorkspace() {
         {!metadata || !points ? (
           <div className="grid min-h-[calc(100vh-150px)] place-items-center py-8">
             <div className="w-full max-w-3xl">
-              <div className="mb-8 text-center"><p className="text-xs font-bold uppercase tracking-[0.24em] text-teal-400">Scientific post-processing</p><h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">Turn simulation tables into an interactive engineering workspace.</h2><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-400 sm:text-base">Upload a COMSOL CSV. Coordinates, scalar fields, dimensions, and bounds are detected without field-specific assumptions.</p></div>
+              <div className="mb-8 text-center"><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#0f7f8c]">Scientific post-processing</p><h2 className="mt-3 text-3xl font-semibold tracking-tight text-[#123b5a] sm:text-5xl">Turn simulation tables into an interactive engineering workspace.</h2><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#567184] sm:text-base">Upload a COMSOL CSV. Coordinates, scalar fields, dimensions, and bounds are detected without field-specific assumptions.</p></div>
               <UploadDropzone isLoading={isUploading} onUpload={handleUpload} />
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 {[[Database, "Full-data calculations", "Statistics and extrema never use downsampled values."], [Box, "2D + 3D inspection", "Canvas maps and a vtk.js spatial point-cloud viewer."], [Activity, "AI action control", "Natural language triggers validated, deterministic actions."]].map(([Icon, title, copy]) => {
                   const ItemIcon = Icon as typeof Database;
-                  return <div className="rounded-lg border border-slate-800 bg-[#0b151d] p-4" key={String(title)}><ItemIcon className="text-teal-400" size={17} /><p className="mt-3 text-sm font-semibold text-slate-200">{String(title)}</p><p className="mt-1 text-xs leading-5 text-slate-500">{String(copy)}</p></div>;
+                  return <div className="rounded-lg border border-[#d7e2ea] bg-white p-4 shadow-[0_4px_18px_rgba(40,76,102,0.05)]" key={String(title)}><ItemIcon className="text-[#0b7bb5]" size={17} /><p className="mt-3 text-sm font-semibold text-[#16324a]">{String(title)}</p><p className="mt-1 text-xs leading-5 text-[#567184]">{String(copy)}</p></div>;
                 })}
               </div>
             </div>
@@ -228,8 +228,8 @@ export function ExplorerWorkspace() {
         ) : (
           <>
             <div className="grid items-stretch gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
-              <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-[#0b151d] p-3 sm:flex-row sm:flex-wrap sm:items-center">
-                <div className="flex w-full min-w-0 items-center gap-3 sm:flex-1"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-900 text-teal-300"><FileSpreadsheet size={18} /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{metadata.filename}</p><p className="text-xs text-slate-500">{metadata.rowCount.toLocaleString()} rows · {metadata.dimension} · {metadata.fields.length} scalar fields</p></div></div>
+              <div className="flex flex-col gap-3 rounded-xl border border-[#d7e2ea] bg-white p-3 shadow-[0_1px_2px_rgba(22,50,74,0.04),0_8px_24px_rgba(40,76,102,0.05)] sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="flex w-full min-w-0 items-center gap-3 sm:flex-1"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#e8f4f8] text-[#0b6f9f]"><FileSpreadsheet size={18} /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-[#16324a]">{metadata.filename}</p><p className="text-xs text-[#567184]">{metadata.rowCount.toLocaleString()} rows · {metadata.dimension} · {metadata.fields.length} scalar fields</p></div></div>
                 <FieldSelector activeField={activeField} fields={metadata.fields} onChange={(field) => void changeField(field)} />
               </div>
               <UploadDropzone compact isLoading={isUploading} onUpload={handleUpload} />
@@ -244,11 +244,11 @@ export function ExplorerWorkspace() {
               >
                 <div className="relative min-h-[420px]">
                   <SimulationViewer data={visiblePoints!} field={activeField} metadata={metadata} onSelect={selectPosition} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />
-                  <div className="absolute left-3 top-3 flex gap-2"><span className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-300">visual sample</span>}</div>
+                  <div className="absolute left-3 top-3 flex gap-2"><span className="rounded-md border border-[#c6d5df] bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#526f82] shadow-sm backdrop-blur">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-[#edcfa6] bg-[#fff7e9] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a15b17]">visual sample</span>}</div>
                 </div>
-                <div className="flex flex-col gap-3 border-t border-slate-800 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 border-t border-[#d7e2ea] bg-[#fbfdfe] p-3 sm:flex-row sm:items-center sm:justify-between">
                   <ThresholdControls field={activeField} onApply={(value) => void applyThreshold(value)} onClear={() => { setThreshold(null); setFilterMatchCount(null); }} threshold={threshold} />
-                  {filterMatchCount !== null && <p className="shrink-0 text-xs text-slate-500">{filterMatchCount.toLocaleString()} full-data matches</p>}
+                  {filterMatchCount !== null && <p className="shrink-0 text-xs text-[#567184]">{filterMatchCount.toLocaleString()} full-data matches</p>}
                 </div>
               </Panel>
               <AssistantPanel disabled={!metadata || isUploading} onCommand={handleAssistantCommand} />
@@ -259,8 +259,8 @@ export function ExplorerWorkspace() {
               <ProbePanel onStep={stepSelection} point={selectedPoint} />
               <div className="space-y-2">
                 <div className="flex items-center justify-end gap-2">
-                  <span className="mr-auto flex items-center gap-1.5 text-xs text-slate-500"><Ruler size={14} /> Profile axis</span>
-                  {(["x", "y", ...(metadata.dimension === "3D" ? ["z"] : [])] as Array<"x" | "y" | "z">).map((axis) => <button className="min-h-9 rounded-md border border-slate-700 px-3 text-xs font-bold uppercase text-slate-300 hover:border-teal-500 hover:text-teal-300" key={axis} onClick={() => void createProfile(axis)} type="button">{axis}</button>)}
+                  <span className="mr-auto flex items-center gap-1.5 text-xs text-[#567184]"><Ruler className="text-[#0b7bb5]" size={14} /> Profile axis</span>
+                  {(["x", "y", ...(metadata.dimension === "3D" ? ["z"] : [])] as Array<"x" | "y" | "z">).map((axis) => <button className="min-h-9 rounded-md border border-[#b9cbd7] bg-white px-3 text-xs font-bold uppercase text-[#294b63] shadow-sm hover:border-[#0b7bb5] hover:bg-[#eef7fa] hover:text-[#0b5f9e] focus-visible:ring-2 focus-visible:ring-[#0b9fc2] focus-visible:ring-offset-2" key={axis} onClick={() => void createProfile(axis)} type="button">{axis}</button>)}
                 </div>
                 <ProfileChart profile={profile} />
               </div>

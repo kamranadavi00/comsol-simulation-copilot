@@ -49,7 +49,7 @@ export default function VtkViewer({
     const container = containerRef.current;
     if (!container || contextRef.current) return;
     try {
-      const view = vtkGenericRenderWindow.newInstance({ background: [0.027, 0.063, 0.086] });
+      const view = vtkGenericRenderWindow.newInstance({ background: [0.973, 0.984, 0.992] });
       view.setContainer(container);
       const mapper = vtkMapper.newInstance();
       // Resize can trigger a render before the data effect below runs. Give the
@@ -125,9 +125,11 @@ export default function VtkViewer({
     polyData.getPointData().setScalars(vtkDataArray.newInstance({ name: field, values, numberOfComponents: 1 }));
 
     const lookup = vtkColorTransferFunction.newInstance();
-    lookup.addRGBPoint(min, 0.267, 0.005, 0.329);
-    lookup.addRGBPoint(min + (max - min) * 0.5, 0.129, 0.569, 0.549);
-    lookup.addRGBPoint(max, 0.992, 0.906, 0.145);
+    lookup.addRGBPoint(min, 0.071, 0.29, 0.58);
+    lookup.addRGBPoint(min + (max - min) * 0.32, 0.137, 0.522, 0.718);
+    lookup.addRGBPoint(min + (max - min) * 0.58, 0.325, 0.745, 0.776);
+    lookup.addRGBPoint(min + (max - min) * 0.8, 0.957, 0.682, 0.243);
+    lookup.addRGBPoint(max, 0.827, 0.251, 0.212);
     context.mapper.setInputData(polyData);
     context.mapper.setLookupTable(lookup);
     context.mapper.setScalarRange(min, max);
@@ -169,7 +171,7 @@ export default function VtkViewer({
     return (
       <div className="relative min-h-[420px]">
         <ScalarMap2D data={data} field={field} onSelect={onSelect} selectedPoint={selectedPoint} />
-        <p className="absolute bottom-3 left-3 right-3 rounded-md border border-amber-500/20 bg-slate-950/90 px-3 py-2 text-xs text-amber-300">
+        <p className="absolute bottom-3 left-3 right-3 rounded-md border border-[#edcfa6] bg-[#fff8ed]/95 px-3 py-2 text-xs text-[#9b5b19] shadow-sm">
           {renderError} Showing an interactive X–Y scalar projection instead.
         </p>
       </div>
@@ -184,7 +186,7 @@ export default function VtkViewer({
         role="img"
         tabIndex={0}
       />
-      <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-700 bg-slate-950/80 px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-slate-400">
+      <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-[#c6d5df] bg-white/90 px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-[#526f82] shadow-sm">
         Drag rotate · shift drag pan · wheel zoom
       </div>
     </div>

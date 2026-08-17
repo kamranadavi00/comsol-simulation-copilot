@@ -7,7 +7,7 @@ import type { DatasetMetadata, PointData, Representation, SelectedPoint } from "
 
 const VtkViewer = dynamic(() => import("./vtk-viewer"), {
   ssr: false,
-  loading: () => <div className="grid min-h-[420px] place-items-center text-sm text-slate-500">Loading 3D renderer…</div>,
+  loading: () => <div className="grid min-h-[420px] place-items-center bg-[#f7fafc] text-sm text-[#567184]">Loading 3D renderer…</div>,
 });
 
 export function SimulationViewer({
