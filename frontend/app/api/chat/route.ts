@@ -47,6 +47,18 @@ function focusPointHasProvenance(
   });
 }
 
+function highlightedRowsHaveProvenance(
+  rowIndexes: number[],
+  request: ReturnType<typeof aiChatRequestSchema.parse>,
+): boolean {
+  const verifiedIndexes = new Set(
+    request.verifiedResults.flatMap((result) =>
+      result.action === "filter" ? result.rowIndexes : [],
+    ),
+  );
+  return rowIndexes.every((rowIndex) => verifiedIndexes.has(rowIndex));
+}
+
 function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.parse>): boolean {
   const expectedCoordinates = request.dataset.dimension === "3D" ? ["x", "y", "z"] : ["x", "y"];
   if (
@@ -54,6 +66,12 @@ function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.pa
     !expectedCoordinates.every((axis) =>
       request.dataset.coordinates.includes(axis as "x" | "y" | "z"),
     )
+  ) {
+    return false;
+  }
+  if (
+    (request.dataset.dimension === "3D" && !request.dataset.coordinateColumns.z) ||
+    (request.dataset.dimension === "2D" && Boolean(request.dataset.coordinateColumns.z))
   ) {
     return false;
   }
@@ -73,6 +91,12 @@ function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.pa
     return false;
   }
   if (
+    request.visualization.highlightedRegion &&
+    !request.dataset.availableFields.includes(request.visualization.highlightedRegion.field)
+  ) {
+    return false;
+  }
+  if (
     request.visualization.selectedLocation &&
     !locationFitsDataset(request.visualization.selectedLocation, request)
   ) {
@@ -81,7 +105,7 @@ function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.pa
   return request.verifiedResults.every((result) => {
     if ("field" in result && !request.dataset.availableFields.includes(result.field)) return false;
     if (result.action === "find_max" || result.action === "find_min" || result.action === "nearest_point") {
-      return locationFitsDataset(result.location, request);
+      return result.rowIndex < request.dataset.rowCount && locationFitsDataset(result.location, request);
     }
     if (result.action === "statistics") {
       return (
@@ -91,6 +115,9 @@ function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.pa
     }
     if (result.action === "profile") {
       return result.axis !== "z" || request.dataset.dimension === "3D";
+    }
+    if (result.action === "filter") {
+      return result.rowIndexes.every((rowIndex) => rowIndex < request.dataset.rowCount);
     }
     return true;
   });
@@ -162,6 +189,14 @@ export async function POST(request: Request) {
     );
     if (unverifiedFocus) {
       throw new Error("The assistant returned focus coordinates without a verified source.");
+    }
+    const unverifiedHighlight = validated.actions.find(
+      (action) =>
+        action.type === "highlight_points" &&
+        !highlightedRowsHaveProvenance(action.rowIndexes, assistantRequest),
+    );
+    if (unverifiedHighlight) {
+      throw new Error("The assistant returned point indexes without a verified source.");
     }
     return NextResponse.json(validated);
   } catch (error) {

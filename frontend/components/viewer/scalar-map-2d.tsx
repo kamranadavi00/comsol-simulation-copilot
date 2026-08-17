@@ -9,11 +9,13 @@ export default function ScalarMap2D({
   data,
   field,
   selectedPoint,
+  highlightedRowIndexes,
   onSelect,
 }: {
   data: PointData;
   field: string;
   selectedPoint: SelectedPoint | null;
+  highlightedRowIndexes: number[];
   onSelect: (position: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,6 +53,8 @@ export default function ScalarMap2D({
       const maxY = Math.max(...data.coordinates.y);
       transformRef.current = { left, top, width: plotWidth, height: plotHeight, minX, maxX, minY, maxY };
       const values = data.fields[field] ?? [];
+      const highlighted = new Set(highlightedRowIndexes);
+      const hasHighlights = highlighted.size > 0;
       const [min, max] = finiteRange(values);
       const count = Math.max(1, data.returnedPoints);
       const radius = Math.max(2, Math.min(7, Math.sqrt((plotWidth * plotHeight) / count) * 0.42));
@@ -69,13 +73,26 @@ export default function ScalarMap2D({
         if (value === null || !Number.isFinite(value)) continue;
         const x = left + ((data.coordinates.x[index] - minX) / (maxX - minX || 1)) * plotWidth;
         const y = top + plotHeight - ((data.coordinates.y[index] - minY) / (maxY - minY || 1)) * plotHeight;
-        context.fillStyle = scalarColor(value, min, max, 0.9);
+        const isHighlighted = highlighted.has(data.rowIndexes[index]);
+        context.fillStyle = scalarColor(value, min, max, hasHighlights && !isHighlighted ? 0.28 : 0.92);
         context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fill();
-        if (selectedPoint?.rowIndex === data.rowIndexes[index]) {
-          context.strokeStyle = "#df6c2f";
-          context.lineWidth = 3;
-          context.beginPath(); context.arc(x, y, radius + 5, 0, Math.PI * 2); context.stroke();
+        if (isHighlighted) {
+          context.strokeStyle = "#d97706";
+          context.lineWidth = 2.5;
+          context.beginPath(); context.arc(x, y, radius + 3, 0, Math.PI * 2); context.stroke();
         }
+      }
+
+      if (selectedPoint) {
+        const selectedX = left + ((selectedPoint.location.x - minX) / (maxX - minX || 1)) * plotWidth;
+        const selectedY = top + plotHeight - ((selectedPoint.location.y - minY) / (maxY - minY || 1)) * plotHeight;
+        context.fillStyle = "#ffffff";
+        context.beginPath(); context.arc(selectedX, selectedY, radius + 6, 0, Math.PI * 2); context.fill();
+        context.strokeStyle = "#c93f2f";
+        context.lineWidth = 3;
+        context.beginPath(); context.arc(selectedX, selectedY, radius + 5, 0, Math.PI * 2); context.stroke();
+        context.fillStyle = "#c93f2f";
+        context.beginPath(); context.arc(selectedX, selectedY, Math.max(3, radius), 0, Math.PI * 2); context.fill();
       }
 
       context.fillStyle = "#567184";
@@ -97,7 +114,7 @@ export default function ScalarMap2D({
     const observer = new ResizeObserver(render);
     observer.observe(parent);
     return () => observer.disconnect();
-  }, [data, field, selectedPoint]);
+  }, [data, field, highlightedRowIndexes, selectedPoint]);
 
   function handlePointer(event: React.PointerEvent<HTMLCanvasElement>) {
     const transform = transformRef.current;
@@ -118,10 +135,12 @@ export default function ScalarMap2D({
   }
 
   const [min, max] = finiteRange(data.fields[field] ?? []);
+  const highlighted = new Set(highlightedRowIndexes);
+  const visibleHighlightedCount = data.rowIndexes.filter((rowIndex) => highlighted.has(rowIndex)).length;
   return (
     <div className="relative h-full min-h-[360px] overflow-hidden bg-[#f8fbfd]">
       <canvas
-        aria-label={`Interactive 2D scalar map of ${field}, showing ${data.returnedPoints} points from ${min} to ${max}. Click a point to inspect it.`}
+        aria-label={`Interactive 2D scalar map of ${field}, showing ${data.returnedPoints} points from ${min} to ${max}${visibleHighlightedCount ? `, with ${visibleHighlightedCount} verified matches highlighted` : ""}. Click a point to inspect it.`}
         className="block touch-manipulation"
         onPointerDown={handlePointer}
         ref={canvasRef}

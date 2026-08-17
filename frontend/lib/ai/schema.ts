@@ -9,7 +9,7 @@ const locationSchema = z
 export const aiActionSchema = z.discriminatedUnion("type", [
   fieldAction.extend({ type: z.literal("change_field") }),
   fieldAction.extend({
-    type: z.literal("set_threshold"),
+    type: z.literal("filter"),
     operator: z.enum([">", ">=", "<", "<="]),
     value: finiteNumber,
   }),
@@ -21,6 +21,12 @@ export const aiActionSchema = z.discriminatedUnion("type", [
     axis: z.enum(["x", "y", "z"]),
   }),
   locationSchema.extend({ type: z.literal("focus_point") }),
+  z
+    .object({
+      type: z.literal("highlight_points"),
+      rowIndexes: z.array(z.number().int().nonnegative()).max(50_000),
+    })
+    .strict(),
   z.object({ type: z.literal("reset_view") }).strict(),
 ]);
 
@@ -49,8 +55,16 @@ const thresholdContextSchema = z
 export const aiDatasetContextSchema = z
   .object({
     datasetId: z.string().min(1).max(200),
+    rowCount: z.number().int().positive(),
     dimension: z.enum(["2D", "3D"]),
     coordinates: z.array(z.enum(["x", "y", "z"])).min(2).max(3),
+    coordinateColumns: z
+      .object({
+        x: z.string().min(1),
+        y: z.string().min(1),
+        z: z.string().min(1).nullable().optional(),
+      })
+      .strict(),
     availableFields: z.array(z.string().min(1)).min(1).max(200),
     bounds: z.partialRecord(z.enum(["x", "y", "z"]), z.tuple([finiteNumber, finiteNumber])),
   })
@@ -61,20 +75,34 @@ export const aiVisualizationContextSchema = z
     activeField: z.string().min(1),
     representation: z.enum(["surface", "points", "wireframe"]),
     threshold: thresholdContextSchema.nullable(),
+    highlightedRegion: thresholdContextSchema
+      .extend({ matchedCount: z.number().int().nonnegative() })
+      .nullable(),
     selectedLocation: locationSchema.nullable(),
   })
   .strict();
 
+export const verifiedExtremeResultSchema = z
+  .object({
+    action: z.enum(["find_max", "find_min"]),
+    field: z.string().min(1),
+    value: finiteNumber,
+    rowIndex: z.number().int().nonnegative(),
+    location: locationSchema,
+  })
+  .strict();
+
+export const verifiedNearestPointResultSchema = z
+  .object({
+    action: z.literal("nearest_point"),
+    rowIndex: z.number().int().nonnegative(),
+    location: locationSchema,
+    values: z.record(z.string(), finiteNumber),
+  })
+  .strict();
+
 export const aiVerifiedResultSchema = z.discriminatedUnion("action", [
-  z
-    .object({
-      action: z.enum(["find_max", "find_min"]),
-      field: z.string().min(1),
-      value: finiteNumber,
-      rowIndex: z.number().int().nonnegative(),
-      location: locationSchema,
-    })
-    .strict(),
+  verifiedExtremeResultSchema,
   z
     .object({
       action: z.literal("statistics"),
@@ -97,6 +125,7 @@ export const aiVerifiedResultSchema = z.discriminatedUnion("action", [
       operator: z.enum([">", ">=", "<", "<="]),
       value: finiteNumber,
       matchedCount: z.number().int().nonnegative(),
+      rowIndexes: z.array(z.number().int().nonnegative()).max(50_000),
     })
     .strict(),
   z
@@ -107,14 +136,7 @@ export const aiVerifiedResultSchema = z.discriminatedUnion("action", [
       pointCount: z.number().int().nonnegative(),
     })
     .strict(),
-  z
-    .object({
-      action: z.literal("nearest_point"),
-      rowIndex: z.number().int().nonnegative(),
-      location: locationSchema,
-      values: z.record(z.string(), finiteNumber),
-    })
-    .strict(),
+  verifiedNearestPointResultSchema,
 ]);
 
 export const aiChatRequestSchema = z
@@ -207,7 +229,7 @@ export const aiResponseJsonSchema = {
         oneOf: [
           actionJsonSchema("change_field", { field: { type: "string" } }, ["field"]),
           actionJsonSchema(
-            "set_threshold",
+            "filter",
             {
               field: { type: "string" },
               operator: { type: "string", enum: [">", ">=", "<", "<="] },
@@ -227,6 +249,17 @@ export const aiResponseJsonSchema = {
             "focus_point",
             { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } },
             ["x", "y"],
+          ),
+          actionJsonSchema(
+            "highlight_points",
+            {
+              rowIndexes: {
+                type: "array",
+                maxItems: 50_000,
+                items: { type: "integer", minimum: 0 },
+              },
+            },
+            ["rowIndexes"],
           ),
           actionJsonSchema("reset_view", {}, []),
         ],

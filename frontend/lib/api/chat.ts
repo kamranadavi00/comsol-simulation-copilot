@@ -17,8 +17,10 @@ export async function requestAssistantActions(
 ): Promise<AIResponse> {
   const dataset = {
     datasetId: metadata.datasetId,
+    rowCount: metadata.rowCount,
     dimension: metadata.dimension,
     coordinates: metadata.dimension === "3D" ? (["x", "y", "z"] as const) : (["x", "y"] as const),
+    coordinateColumns: metadata.coordinateColumns,
     availableFields: metadata.fields,
     bounds: metadata.bounds,
   };

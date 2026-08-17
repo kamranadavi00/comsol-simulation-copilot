@@ -21,6 +21,10 @@ type VtkContext = {
   view: ReturnType<typeof vtkGenericRenderWindow.newInstance>;
   mapper: ReturnType<typeof vtkMapper.newInstance>;
   actor: ReturnType<typeof vtkActor.newInstance>;
+  highlightMapper: ReturnType<typeof vtkMapper.newInstance>;
+  highlightActor: ReturnType<typeof vtkActor.newInstance>;
+  selectionMapper: ReturnType<typeof vtkMapper.newInstance>;
+  selectionActor: ReturnType<typeof vtkActor.newInstance>;
   unsubscribePick: () => void;
 };
 
@@ -29,6 +33,7 @@ export default function VtkViewer({
   field,
   representation,
   selectedPoint,
+  highlightedRowIndexes,
   resetNonce,
   onSelect,
 }: {
@@ -36,11 +41,13 @@ export default function VtkViewer({
   field: string;
   representation: Representation;
   selectedPoint: SelectedPoint | null;
+  highlightedRowIndexes: number[];
   resetNonce: number;
   onSelect: (position: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contextRef = useRef<VtkContext | null>(null);
+  const focusFrameRef = useRef<number | null>(null);
   const selectRef = useRef(onSelect);
   const [renderError, setRenderError] = useState<string | null>(null);
   selectRef.current = onSelect;
@@ -59,6 +66,26 @@ export default function VtkViewer({
       actor.setMapper(mapper);
       actor.getProperty().setPointSize(5);
       view.getRenderer().addActor(actor);
+
+      const highlightMapper = vtkMapper.newInstance();
+      highlightMapper.setInputData(vtkPolyData.newInstance());
+      const highlightActor = vtkActor.newInstance();
+      highlightActor.setMapper(highlightMapper);
+      highlightActor.getProperty().setRepresentationToPoints();
+      highlightActor.getProperty().setPointSize(10);
+      highlightActor.getProperty().setColor(0.851, 0.467, 0.024);
+      highlightActor.setVisibility(false);
+      view.getRenderer().addActor(highlightActor);
+
+      const selectionMapper = vtkMapper.newInstance();
+      selectionMapper.setInputData(vtkPolyData.newInstance());
+      const selectionActor = vtkActor.newInstance();
+      selectionActor.setMapper(selectionMapper);
+      selectionActor.getProperty().setRepresentationToPoints();
+      selectionActor.getProperty().setPointSize(15);
+      selectionActor.getProperty().setColor(0.82, 0.18, 0.12);
+      selectionActor.setVisibility(false);
+      view.getRenderer().addActor(selectionActor);
 
       const picker = vtkPointPicker.newInstance();
       picker.setPickFromList(true);
@@ -81,6 +108,10 @@ export default function VtkViewer({
         view,
         mapper,
         actor,
+        highlightMapper,
+        highlightActor,
+        selectionMapper,
+        selectionActor,
         unsubscribePick: () => {
           subscription.unsubscribe();
           observer.disconnect();
@@ -95,6 +126,7 @@ export default function VtkViewer({
       const context = contextRef.current;
       if (!context) return;
       context.unsubscribePick();
+      if (focusFrameRef.current !== null) window.cancelAnimationFrame(focusFrameRef.current);
       context.view.delete();
       contextRef.current = null;
     };
@@ -142,6 +174,33 @@ export default function VtkViewer({
   useEffect(() => {
     const context = contextRef.current;
     if (!context) return;
+    const highlighted = new Set(highlightedRowIndexes);
+    const positions = data.rowIndexes
+      .map((rowIndex, position) => (highlighted.has(rowIndex) ? position : -1))
+      .filter((position) => position >= 0);
+    const coordinates = new Float32Array(positions.length * 3);
+    const cells = new Uint32Array(positions.length * 2);
+    positions.forEach((position, index) => {
+      coordinates[index * 3] = data.coordinates.x[position];
+      coordinates[index * 3 + 1] = data.coordinates.y[position];
+      coordinates[index * 3 + 2] = data.coordinates.z?.[position] ?? 0;
+      cells[index * 2] = 1;
+      cells[index * 2 + 1] = index;
+    });
+    const points = vtkPoints.newInstance();
+    points.setData(coordinates, 3);
+    const polyData = vtkPolyData.newInstance();
+    polyData.setPoints(points);
+    polyData.setVerts(vtkCellArray.newInstance({ values: cells }));
+    context.highlightMapper.setInputData(polyData);
+    context.highlightActor.setVisibility(positions.length > 0);
+    context.actor.getProperty().setOpacity(positions.length > 0 ? 0.3 : 1);
+    context.view.getRenderWindow().render();
+  }, [data, highlightedRowIndexes]);
+
+  useEffect(() => {
+    const context = contextRef.current;
+    if (!context) return;
     const property = context.actor.getProperty();
     if (representation === "points") property.setRepresentationToPoints();
     if (representation === "surface") property.setRepresentationToSurface();
@@ -152,12 +211,52 @@ export default function VtkViewer({
   useEffect(() => {
     const context = contextRef.current;
     if (!context) return;
-    if (selectedPoint) {
-      const { x, y, z = 0 } = selectedPoint.location;
-      context.view.getRenderer().getActiveCamera().setFocalPoint(x, y, z);
+    if (focusFrameRef.current !== null) window.cancelAnimationFrame(focusFrameRef.current);
+    if (!selectedPoint) {
+      context.selectionActor.setVisibility(false);
+      context.view.getRenderWindow().render();
+      return;
+    }
+
+    const { x, y, z = 0 } = selectedPoint.location;
+    const points = vtkPoints.newInstance();
+    points.setData(new Float32Array([x, y, z]), 3);
+    const polyData = vtkPolyData.newInstance();
+    polyData.setPoints(points);
+    polyData.setVerts(vtkCellArray.newInstance({ values: new Uint32Array([1, 0]) }));
+    context.selectionMapper.setInputData(polyData);
+    context.selectionActor.setVisibility(true);
+
+    const camera = context.view.getRenderer().getActiveCamera();
+    const startFocal = [...camera.getFocalPoint()];
+    const startPosition = [...camera.getPosition()];
+    const target = [x, y, z];
+    const endPosition = target.map(
+      (coordinate, index) => coordinate + (startPosition[index] - startFocal[index]) * 0.65,
+    );
+    const startTime = performance.now();
+    const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260;
+    const animate = (now: number) => {
+      const progress = duration === 0 ? 1 : Math.min(1, (now - startTime) / duration);
+      const eased = 1 - (1 - progress) ** 3;
+      const focal = target.map(
+        (coordinate, index) => startFocal[index] + (coordinate - startFocal[index]) * eased,
+      );
+      const position = endPosition.map(
+        (coordinate, index) => startPosition[index] + (coordinate - startPosition[index]) * eased,
+      );
+      camera.setFocalPoint(focal[0], focal[1], focal[2]);
+      camera.setPosition(position[0], position[1], position[2]);
       context.view.getRenderer().resetCameraClippingRange();
       context.view.getRenderWindow().render();
-    }
+      focusFrameRef.current = progress < 1 ? window.requestAnimationFrame(animate) : null;
+    };
+    focusFrameRef.current = window.requestAnimationFrame(animate);
+
+    return () => {
+      if (focusFrameRef.current !== null) window.cancelAnimationFrame(focusFrameRef.current);
+      focusFrameRef.current = null;
+    };
   }, [selectedPoint]);
 
   useEffect(() => {
@@ -170,7 +269,7 @@ export default function VtkViewer({
   if (renderError) {
     return (
       <div className="relative min-h-[420px]">
-        <ScalarMap2D data={data} field={field} onSelect={onSelect} selectedPoint={selectedPoint} />
+        <ScalarMap2D data={data} field={field} highlightedRowIndexes={highlightedRowIndexes} onSelect={onSelect} selectedPoint={selectedPoint} />
         <p className="absolute bottom-3 left-3 right-3 rounded-md border border-[#edcfa6] bg-[#fff8ed]/95 px-3 py-2 text-xs text-[#9b5b19] shadow-sm">
           {renderError} Showing an interactive X–Y scalar projection instead.
         </p>
@@ -180,7 +279,7 @@ export default function VtkViewer({
   return (
     <div className="relative h-full min-h-[420px]">
       <div
-        aria-label={`Interactive 3D point-cloud visualization of ${field}. Drag to rotate, scroll to zoom, and click a point to inspect it.`}
+        aria-label={`Interactive 3D point-cloud visualization of ${field}${highlightedRowIndexes.length ? ` with verified matching points highlighted` : ""}. Drag to rotate, scroll to zoom, and click a point to inspect it.`}
         className="absolute inset-0 touch-none"
         ref={containerRef}
         role="img"

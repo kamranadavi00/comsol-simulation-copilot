@@ -16,6 +16,7 @@ export function SimulationViewer({
   field,
   representation,
   selectedPoint,
+  highlightedRowIndexes,
   resetNonce,
   onSelect,
 }: {
@@ -24,12 +25,13 @@ export function SimulationViewer({
   field: string;
   representation: Representation;
   selectedPoint: SelectedPoint | null;
+  highlightedRowIndexes: number[];
   resetNonce: number;
   onSelect: (position: number) => void;
 }) {
   return metadata.dimension === "3D" ? (
-    <VtkViewer data={data} field={field} onSelect={onSelect} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />
+    <VtkViewer data={data} field={field} highlightedRowIndexes={highlightedRowIndexes} onSelect={onSelect} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />
   ) : (
-    <ScalarMap2D data={data} field={field} onSelect={onSelect} selectedPoint={selectedPoint} />
+    <ScalarMap2D data={data} field={field} highlightedRowIndexes={highlightedRowIndexes} onSelect={onSelect} selectedPoint={selectedPoint} />
   );
 }

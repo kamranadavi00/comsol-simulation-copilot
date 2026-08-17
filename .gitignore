@@ -8,7 +8,8 @@ out/
 
 # Environment files (keep examples committed)
 .env*
-!.env.example
+.env.example
+.env.local
 
 # Python
 __pycache__/

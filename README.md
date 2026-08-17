@@ -8,9 +8,11 @@ The project is an MVP monorepo with no database and no authentication. Uploaded 
 
 - Frontend: Next.js 15, TypeScript, Tailwind CSS, vtk.js, Canvas, SVG, Zod
 - Backend: FastAPI, Pydantic, Pandas, NumPy, SciPy, Uvicorn
-- AI command interpreter: OpenRouter with `z-ai`, called only from a Next.js server route
+- AI command interpreter: OpenRouter with GLM-5.2, called only from a Next.js server route
 
 Python remains the source of truth for all numerical results. The language model can only return a validated set of visualization and analysis actions; it cannot execute code or calculate simulation values.
+
+The assistant receives the active dataset ID, exact detected field names, coordinate axes, bounds, current visualization state, recent conversation history, and—when applicable—verified FastAPI results. OpenRouter is constrained by a strict JSON schema, and the same response is validated again with Zod and dataset-aware field, axis, value, and coordinate checks before the centralized action executor runs it.
 
 ## Project structure
 
@@ -27,6 +29,9 @@ Python remains the source of truth for all numerical results. The language model
 │   │   └── viewer/
 │   ├── lib/
 │   │   ├── ai/
+│   │   │   ├── action-executor.ts
+│   │   │   ├── schema.ts
+│   │   │   └── system-prompt.ts
 │   │   └── api/
 │   └── types/
 └── backend/
@@ -78,10 +83,24 @@ The minimum local frontend configuration is:
 ```dotenv
 NEXT_PUBLIC_API_URL=http://localhost:8000
 OPENROUTER_API_KEY=your-openrouter-key
-OPENROUTER_MODEL=z-ai
+OPENROUTER_MODEL=z-ai/glm-5.2
+# OPENROUTER_API_URL=https://openrouter.ai/api/v1/chat/completions
 ```
 
 `OPENROUTER_API_KEY` is server-only and must never be prefixed with `NEXT_PUBLIC_`. The application remains fully usable without it; only the assistant returns a configuration message.
+
+The AI control flow is:
+
+```text
+User chat -> Next.js server route -> GLM-5.2 structured JSON
+          -> dataset-aware validation -> centralized action executor
+          -> frontend viewer state and/or deterministic FastAPI calculation
+          -> optional verified-result explanation
+```
+
+Extrema are calculated before the viewer changes state, then their verified row/location drives the selection marker and camera focus. AI `filter` actions are evaluated over the complete DataFrame; FastAPI also returns the verified matches for the current visual sample so Canvas and VTK can emphasize those points without hiding the surrounding simulation context. Chat results are formatted from the returned backend values, not model-generated numbers.
+
+The chat panel has a bounded height, retains its full visible conversation, scrolls messages internally, and automatically follows new user, loading, result, and error messages without scrolling the page.
 
 ## CSV expectations
 

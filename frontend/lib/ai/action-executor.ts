@@ -1,3 +1,4 @@
+import { verifiedExtremeResultSchema } from "./schema";
 import type {
   AIAction,
   AIVerifiedResult,
@@ -18,7 +19,8 @@ export interface AIActionExecutorContext {
   datasetId: string;
   visualization: AIVisualizationContext;
   changeField: (field: string) => Promise<void>;
-  applyThreshold: (threshold: Threshold) => Promise<FilterResult>;
+  highlightRegion: (threshold: Threshold) => Promise<FilterResult>;
+  highlightPoints: (rowIndexes: number[]) => void;
   createProfile: (axis: "x" | "y" | "z", field: string) => Promise<ProfileResult>;
   focusLocation: (location: { x: number; y: number; z?: number }) => Promise<NearestPointResult>;
   loadStatistics: (field: string) => Promise<StatisticsResult>;
@@ -45,27 +47,48 @@ export async function executeAIActions(
         ...visualization,
         activeField: action.field,
         threshold: null,
+        highlightedRegion: null,
         selectedLocation: null,
       };
       continue;
     }
 
-    if (action.type === "set_threshold") {
-      const result = await context.applyThreshold(action);
+    if (action.type === "filter") {
+      const result = await context.highlightRegion(action);
       verifiedResults.push({
         action: "filter",
         field: action.field,
         operator: action.operator,
         value: action.value,
         matchedCount: result.matchedCount,
+        rowIndexes: result.rowIndexes,
       });
-      visualization = { ...visualization, threshold: action };
+      visualization = {
+        ...visualization,
+        threshold: null,
+        highlightedRegion: {
+          field: action.field,
+          operator: action.operator,
+          value: action.value,
+          matchedCount: result.matchedCount,
+        },
+      };
+      continue;
+    }
+
+    if (action.type === "highlight_points") {
+      context.highlightPoints(action.rowIndexes);
       continue;
     }
 
     if (action.type === "reset_view") {
       context.resetView();
-      visualization = { ...visualization, threshold: null, selectedLocation: null };
+      visualization = {
+        ...visualization,
+        threshold: null,
+        highlightedRegion: null,
+        selectedLocation: null,
+      };
       continue;
     }
 
@@ -93,11 +116,23 @@ export async function executeAIActions(
       continue;
     }
 
-    const result = await executeDatasetAction<ExtremeResult>(
-      context.datasetId,
-      action.type,
-      { field: action.field },
+    const result = verifiedExtremeResultSchema.parse(
+      await executeDatasetAction<ExtremeResult>(
+        context.datasetId,
+        action.type,
+        { field: action.field },
+      ),
     );
+    if (visualization.activeField !== action.field) {
+      await context.changeField(action.field);
+      visualization = {
+        ...visualization,
+        activeField: action.field,
+        threshold: null,
+        highlightedRegion: null,
+        selectedLocation: null,
+      };
+    }
     verifiedResults.push(result);
     await context.focusLocation(result.location);
     visualization = { ...visualization, selectedLocation: result.location };
@@ -107,4 +142,40 @@ export async function executeAIActions(
   }
 
   return { verifiedResults, visualization };
+}
+
+function exactLocation(location: { x: number; y: number; z?: number }): string {
+  return [
+    `x = ${String(location.x)}`,
+    `y = ${String(location.y)}`,
+    ...(location.z === undefined ? [] : [`z = ${String(location.z)}`]),
+  ].join(", ");
+}
+
+export function formatVerifiedResults(results: AIVerifiedResult[]): string {
+  return results
+    .map((result) => {
+      if (result.action === "find_max" || result.action === "find_min") {
+        const label = result.action === "find_max" ? "Maximum" : "Minimum";
+        return `${label} ${result.field}: ${String(result.value)}\nLocation: ${exactLocation(result.location)}\nRow: ${result.rowIndex}`;
+      }
+      if (result.action === "statistics") {
+        return [
+          `${result.field} statistics (${result.count} values)`,
+          `Minimum: ${String(result.min)}`,
+          `Maximum: ${String(result.max)}`,
+          `Mean: ${String(result.mean)}`,
+          `Median: ${String(result.median)}`,
+          `Standard deviation: ${String(result.standardDeviation)}`,
+        ].join("\n");
+      }
+      if (result.action === "filter") {
+        return `${result.matchedCount} rows match ${result.field} ${result.operator} ${String(result.value)}. Verified matches are highlighted in the viewer.`;
+      }
+      if (result.action === "profile") {
+        return `Created a verified ${result.pointCount}-point ${result.field} profile along ${result.axis.toUpperCase()}.`;
+      }
+      return `Focused verified row ${result.rowIndex}.\nLocation: ${exactLocation(result.location)}`;
+    })
+    .join("\n\n");
 }

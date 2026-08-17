@@ -13,7 +13,8 @@ import { FieldSelector } from "@/components/viewer/field-selector";
 import { SimulationViewer } from "@/components/viewer/simulation-viewer";
 import { ThresholdControls } from "@/components/viewer/threshold-controls";
 import { ViewerControls } from "@/components/viewer/viewer-controls";
-import { executeAIActions } from "@/lib/ai/action-executor";
+import { executeAIActions, formatVerifiedResults } from "@/lib/ai/action-executor";
+import { verifiedNearestPointResultSchema } from "@/lib/ai/schema";
 import type { AIConversationMessage, AIVisualizationContext } from "@/lib/ai/schema";
 import { requestAssistantActions } from "@/lib/api/chat";
 import {
@@ -52,6 +53,8 @@ export function ExplorerWorkspace() {
   const [statistics, setStatistics] = useState<StatisticsResult | null>(null);
   const [profile, setProfile] = useState<ProfileResult | null>(null);
   const [filterMatchCount, setFilterMatchCount] = useState<number | null>(null);
+  const [highlightedRowIndexes, setHighlightedRowIndexes] = useState<number[]>([]);
+  const [highlightedRegion, setHighlightedRegion] = useState<AIVisualizationContext["highlightedRegion"]>(null);
   const [resetNonce, setResetNonce] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -66,6 +69,11 @@ export function ExplorerWorkspace() {
     () => (points && activeField ? filteredPointData(points, activeField, threshold) : null),
     [points, activeField, threshold],
   );
+  const visibleHighlightedCount = useMemo(() => {
+    if (!visiblePoints || !highlightedRowIndexes.length) return 0;
+    const highlighted = new Set(highlightedRowIndexes);
+    return visiblePoints.rowIndexes.filter((rowIndex) => highlighted.has(rowIndex)).length;
+  }, [highlightedRowIndexes, visiblePoints]);
 
   async function loadStatistics(datasetId: string, field: string) {
     setIsAnalyzing(true);
@@ -93,6 +101,8 @@ export function ExplorerWorkspace() {
       setSelectedPoint(null);
       setProfile(null);
       setFilterMatchCount(null);
+      setHighlightedRowIndexes([]);
+      setHighlightedRegion(null);
       setConnection("connected");
       await loadStatistics(nextMetadata.datasetId, field);
       setNotice(`${nextMetadata.filename} loaded with ${nextMetadata.rowCount.toLocaleString()} valid rows.`);
@@ -105,13 +115,17 @@ export function ExplorerWorkspace() {
   }
 
   async function changeField(field: string) {
-    if (!metadata || field === activeField) return;
-    setActiveField(field);
+    if (!metadata) return;
+    const fieldChanged = field !== activeField;
+    if (fieldChanged) setActiveField(field);
     setThreshold(null);
     setFilterMatchCount(null);
     setSelectedPoint(null);
     setProfile(null);
     setError(null);
+    setHighlightedRowIndexes([]);
+    setHighlightedRegion(null);
+    if (!fieldChanged) return;
     try {
       await loadStatistics(metadata.datasetId, field);
     } catch (caught) {
@@ -135,12 +149,34 @@ export function ExplorerWorkspace() {
 
   async function applyThreshold(nextThreshold: Threshold) {
     if (!metadata) throw new Error("Upload a dataset before applying a threshold.");
-    setThreshold(nextThreshold);
     setError(null);
     try {
       const result = await executeDatasetAction<FilterResult>(metadata.datasetId, "filter", nextThreshold);
+      setThreshold(nextThreshold);
       setFilterMatchCount(result.matchedCount);
+      setHighlightedRowIndexes([]);
+      setHighlightedRegion(null);
       setNotice(`${result.matchedCount.toLocaleString()} complete-dataset rows match the threshold.`);
+      return result;
+    } catch (caught) {
+      setError(messageFrom(caught));
+      throw caught;
+    }
+  }
+
+  async function highlightRegion(nextThreshold: Threshold) {
+    if (!metadata) throw new Error("Upload a dataset before highlighting a region.");
+    setError(null);
+    try {
+      const result = await executeDatasetAction<FilterResult>(metadata.datasetId, "filter", {
+        ...nextThreshold,
+        visualRowIndexes: points?.rowIndexes ?? [],
+      });
+      setThreshold(null);
+      setHighlightedRowIndexes(result.rowIndexes);
+      setHighlightedRegion({ ...nextThreshold, matchedCount: result.matchedCount });
+      setFilterMatchCount(result.matchedCount);
+      setNotice(`${result.matchedCount.toLocaleString()} verified rows match and are highlighted.`);
       return result;
     } catch (caught) {
       setError(messageFrom(caught));
@@ -167,7 +203,9 @@ export function ExplorerWorkspace() {
 
   async function focusLocation(location: { x: number; y: number; z?: number }) {
     if (!metadata) throw new Error("Upload a dataset before selecting a point.");
-    const result = await executeDatasetAction<NearestPointResult>(metadata.datasetId, "nearest_point", location);
+    const result = verifiedNearestPointResultSchema.parse(
+      await executeDatasetAction<NearestPointResult>(metadata.datasetId, "nearest_point", location),
+    );
     setSelectedPoint({ rowIndex: result.rowIndex, location: result.location, values: result.values });
     return result;
   }
@@ -176,60 +214,59 @@ export function ExplorerWorkspace() {
     setThreshold(null);
     setFilterMatchCount(null);
     setSelectedPoint(null);
+    setHighlightedRowIndexes([]);
+    setHighlightedRegion(null);
     setResetNonce((value) => value + 1);
   }
 
   async function handleAssistantCommand(
     message: string,
     history: AIConversationMessage[],
+    onPhase: (phase: "interpreting" | "analyzing" | "updating") => void,
   ): Promise<string> {
     if (!metadata) throw new Error("Upload a dataset before using the assistant.");
     const visualization: AIVisualizationContext = {
       activeField,
       representation,
       threshold,
+      highlightedRegion,
       selectedLocation: selectedPoint?.location ?? null,
     };
     const response = await requestAssistantActions(message, metadata, visualization, history);
-    const execution = await executeAIActions(response.actions, {
-      datasetId: metadata.datasetId,
-      visualization,
-      changeField,
-      applyThreshold,
-      createProfile,
-      focusLocation,
-      loadStatistics: (field) => loadStatistics(metadata.datasetId, field),
-      resetView: resetVisualization,
-      setNotice,
-    });
-
-    if (!execution.verifiedResults.length) return response.message;
-
+    const requiresBackend = response.actions.some((action) =>
+      ["find_max", "find_min", "statistics", "filter", "create_profile", "focus_point"].includes(
+        action.type,
+      ),
+    );
+    onPhase(requiresBackend ? "analyzing" : "updating");
+    let execution: Awaited<ReturnType<typeof executeAIActions>>;
     try {
-      const explained = await requestAssistantActions(
-        message,
-        metadata,
-        execution.visualization,
-        history,
-        execution.verifiedResults,
-      );
-      await executeAIActions(explained.actions, {
+      execution = await executeAIActions(response.actions, {
         datasetId: metadata.datasetId,
-        visualization: execution.visualization,
+        visualization,
         changeField,
-        applyThreshold,
+        highlightRegion,
+        highlightPoints: setHighlightedRowIndexes,
         createProfile,
         focusLocation,
         loadStatistics: (field) => loadStatistics(metadata.datasetId, field),
         resetView: resetVisualization,
         setNotice,
       });
-      return explained.message;
-    } catch {
-      // The requested actions already succeeded. Keep their original model message
-      // if optional verified-result narration is unavailable.
-      return response.message;
+    } catch (caught) {
+      setActiveField(activeField);
+      setThreshold(threshold);
+      setHighlightedRegion(highlightedRegion);
+      setHighlightedRowIndexes(highlightedRowIndexes);
+      setSelectedPoint(selectedPoint);
+      setFilterMatchCount(filterMatchCount);
+      setStatistics(statistics);
+      setProfile(profile);
+      throw caught;
     }
+    onPhase("updating");
+    const verifiedMessage = formatVerifiedResults(execution.verifiedResults);
+    return verifiedMessage ? `${response.message}\n\n${verifiedMessage}` : response.message;
   }
 
   return (
@@ -285,11 +322,11 @@ export function ExplorerWorkspace() {
                 title={`${activeField} scalar field`}
               >
                 <div className="relative min-h-[420px]">
-                  <SimulationViewer data={visiblePoints!} field={activeField} metadata={metadata} onSelect={selectPosition} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />
-                  <div className="absolute left-3 top-3 flex gap-2"><span className="rounded-md border border-[#c6d5df] bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#526f82] shadow-sm backdrop-blur">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-[#edcfa6] bg-[#fff7e9] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a15b17]">visual sample</span>}</div>
+                  <SimulationViewer data={visiblePoints!} field={activeField} highlightedRowIndexes={highlightedRowIndexes} metadata={metadata} onSelect={selectPosition} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />
+                  <div className="absolute left-3 top-3 flex flex-wrap gap-2"><span className="rounded-md border border-[#c6d5df] bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#526f82] shadow-sm backdrop-blur">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-[#edcfa6] bg-[#fff7e9] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a15b17]">visual sample</span>}{visibleHighlightedCount > 0 && <span className="rounded-md border border-[#e8b591] bg-[#fff3ea] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a9472d]">{visibleHighlightedCount.toLocaleString()} visible highlights</span>}</div>
                 </div>
                 <div className="flex flex-col gap-3 border-t border-[#d7e2ea] bg-[#fbfdfe] p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <ThresholdControls field={activeField} onApply={(value) => void applyThreshold(value).catch(() => undefined)} onClear={() => { setThreshold(null); setFilterMatchCount(null); }} threshold={threshold} />
+                  <ThresholdControls field={activeField} onApply={(value) => void applyThreshold(value).catch(() => undefined)} onClear={() => { setThreshold(null); setFilterMatchCount(null); setHighlightedRowIndexes([]); setHighlightedRegion(null); }} threshold={threshold} />
                   {filterMatchCount !== null && <p className="shrink-0 text-xs text-[#567184]">{filterMatchCount.toLocaleString()} full-data matches</p>}
                 </div>
               </Panel>

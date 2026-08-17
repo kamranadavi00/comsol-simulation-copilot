@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Bot, Send, Sparkles, User } from "lucide-react";
 
 import { Panel } from "@/components/ui/panel";
@@ -12,6 +12,14 @@ interface ChatMessage {
   content: string;
   error?: boolean;
 }
+
+type AssistantPhase = "interpreting" | "analyzing" | "updating";
+
+const phaseLabels: Record<AssistantPhase, string> = {
+  interpreting: "Interpreting command…",
+  analyzing: "Analyzing simulation data with Python…",
+  updating: "Updating visualization…",
+};
 
 const suggestions = [
   "Where is the maximum value?",
@@ -25,7 +33,11 @@ export function AssistantPanel({
   onCommand,
 }: {
   disabled: boolean;
-  onCommand: (message: string, history: AIConversationMessage[]) => Promise<string>;
+  onCommand: (
+    message: string,
+    history: AIConversationMessage[],
+    onPhase: (phase: AssistantPhase) => void,
+  ) => Promise<string>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -36,6 +48,15 @@ export function AssistantPanel({
   ]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [phase, setPhase] = useState<AssistantPhase>("interpreting");
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    container.scrollTo({ top: container.scrollHeight, behavior: reduceMotion ? "auto" : "smooth" });
+  }, [messages, isSending, phase]);
 
   async function submit(message: string) {
     const value = message.trim();
@@ -44,9 +65,10 @@ export function AssistantPanel({
     setMessages((current) => [...current, { id, role: "user", content: value }]);
     setInput("");
     setIsSending(true);
+    setPhase("interpreting");
     try {
       const history = messages.slice(-16).map(({ role, content }) => ({ role, content }));
-      const response = await onCommand(value, history);
+      const response = await onCommand(value, history, setPhase);
       setMessages((current) => [...current, { id: id + 1, role: "assistant", content: response }]);
     } catch (error) {
       setMessages((current) => [
@@ -71,17 +93,17 @@ export function AssistantPanel({
   return (
     <Panel
       action={<span className="flex items-center gap-1.5 rounded-full border border-[#b9d8e5] bg-[#eaf6fa] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#0b6f9f]"><Sparkles size={11} />kami</span>}
-      className="flex min-h-[520px] flex-col overflow-hidden lg:h-full"
+      className="flex h-[clamp(440px,68vh,620px)] min-h-[440px] flex-col overflow-hidden lg:h-full lg:min-h-0"
       eyebrow="Structured actions"
       title="Simulation assistant"
     >
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
+      <div ref={messagesRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4" aria-live="polite">
         {messages.map((message) => (
           <div className={`flex gap-2.5 ${message.role === "user" ? "flex-row-reverse" : ""}`} key={message.id}>
             <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${message.role === "user" ? "bg-[#dce8ef] text-[#24465f]" : "bg-[#dff3f7] text-[#0b7188]"}`}>
               {message.role === "user" ? <User size={14} /> : <Bot size={14} />}
             </span>
-            <p className={`max-w-[85%] rounded-lg px-3 py-2 text-sm leading-6 ${
+            <p className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-6 ${
               message.role === "user"
                 ? "bg-[#0b5f9e] text-white shadow-sm"
                 : message.error
@@ -90,7 +112,7 @@ export function AssistantPanel({
             }`}>{message.content}</p>
           </div>
         ))}
-        {isSending && <p className="ml-10 animate-pulse text-xs text-[#0f7f8c]">Interpreting command…</p>}
+        {isSending && <p className="ml-10 animate-pulse text-xs font-medium text-[#0f7f8c]">{phaseLabels[phase]}</p>}
       </div>
       <div className="border-t border-[#d7e2ea] bg-[#fbfdfe] p-3">
         <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
