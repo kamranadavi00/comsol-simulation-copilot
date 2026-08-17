@@ -157,25 +157,30 @@ export function formatVerifiedResults(results: AIVerifiedResult[]): string {
     .map((result) => {
       if (result.action === "find_max" || result.action === "find_min") {
         const label = result.action === "find_max" ? "Maximum" : "Minimum";
-        return `${label} ${result.field}: ${String(result.value)}\nLocation: ${exactLocation(result.location)}\nRow: ${result.rowIndex}`;
+        return `### ${label} ${result.field}\n\n- **Value:** \`${String(result.value)}\`\n- **Location:** \`${exactLocation(result.location)}\`\n- **Row:** \`${result.rowIndex}\``;
       }
       if (result.action === "statistics") {
         return [
-          `${result.field} statistics (${result.count} values)`,
-          `Minimum: ${String(result.min)}`,
-          `Maximum: ${String(result.max)}`,
-          `Mean: ${String(result.mean)}`,
-          `Median: ${String(result.median)}`,
-          `Standard deviation: ${String(result.standardDeviation)}`,
+          `### ${result.field} statistics`,
+          "",
+          `Calculated from **${result.count}** complete values.`,
+          "",
+          "| Metric | Verified value |",
+          "| --- | ---: |",
+          `| Minimum | \`${String(result.min)}\` |`,
+          `| Maximum | \`${String(result.max)}\` |`,
+          `| Mean | \`${String(result.mean)}\` |`,
+          `| Median | \`${String(result.median)}\` |`,
+          `| Standard deviation | \`${String(result.standardDeviation)}\` |`,
         ].join("\n");
       }
       if (result.action === "filter") {
-        return `${result.matchedCount} rows match ${result.field} ${result.operator} ${String(result.value)}. Verified matches are highlighted in the viewer.`;
+        return `**${result.matchedCount} rows** match \`${result.field} ${result.operator} ${String(result.value)}\`. Verified matches are highlighted in the viewer.`;
       }
       if (result.action === "profile") {
-        return `Created a verified ${result.pointCount}-point ${result.field} profile along ${result.axis.toUpperCase()}.`;
+        return `Created a verified **${result.pointCount}-point** \`${result.field}\` profile along **${result.axis.toUpperCase()}**.`;
       }
-      return `Focused verified row ${result.rowIndex}.\nLocation: ${exactLocation(result.location)}`;
+      return `Focused verified row **${result.rowIndex}**.\n\n- **Location:** \`${exactLocation(result.location)}\``;
     })
     .join("\n\n");
 }
