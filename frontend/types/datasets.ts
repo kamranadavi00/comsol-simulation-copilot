@@ -54,8 +54,8 @@ export interface StatisticsResult {
   median: number;
   standardDeviation: number;
   range: number;
-  minLocation: Record<string, number>;
-  maxLocation: Record<string, number>;
+  minLocation: { x: number; y: number; z?: number };
+  maxLocation: { x: number; y: number; z?: number };
 }
 
 export interface ExtremeResult {
@@ -68,6 +68,9 @@ export interface ExtremeResult {
 
 export interface FilterResult {
   action: "filter";
+  field: string;
+  operator: ThresholdOperator;
+  value: number;
   matchedCount: number;
   returnedCount: number;
   truncated: boolean;

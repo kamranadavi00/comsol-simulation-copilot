@@ -13,7 +13,8 @@ import { FieldSelector } from "@/components/viewer/field-selector";
 import { SimulationViewer } from "@/components/viewer/simulation-viewer";
 import { ThresholdControls } from "@/components/viewer/threshold-controls";
 import { ViewerControls } from "@/components/viewer/viewer-controls";
-import type { AIAction } from "@/lib/ai/schema";
+import { executeAIActions } from "@/lib/ai/action-executor";
+import type { AIConversationMessage, AIVisualizationContext } from "@/lib/ai/schema";
 import { requestAssistantActions } from "@/lib/api/chat";
 import {
   checkBackend,
@@ -21,10 +22,9 @@ import {
   loadDatasetPoints,
   uploadDataset,
 } from "@/lib/api/datasets";
-import { filteredPointData, formatNumber, pointAt } from "@/lib/visualization";
+import { filteredPointData, pointAt } from "@/lib/visualization";
 import type {
   DatasetMetadata,
-  ExtremeResult,
   FilterResult,
   NearestPointResult,
   PointData,
@@ -72,6 +72,7 @@ export function ExplorerWorkspace() {
     try {
       const result = await executeDatasetAction<StatisticsResult>(datasetId, "statistics", { field });
       setStatistics(result);
+      return result;
     } finally {
       setIsAnalyzing(false);
     }
@@ -133,61 +134,102 @@ export function ExplorerWorkspace() {
   }
 
   async function applyThreshold(nextThreshold: Threshold) {
-    if (!metadata) return;
+    if (!metadata) throw new Error("Upload a dataset before applying a threshold.");
     setThreshold(nextThreshold);
     setError(null);
     try {
       const result = await executeDatasetAction<FilterResult>(metadata.datasetId, "filter", nextThreshold);
       setFilterMatchCount(result.matchedCount);
       setNotice(`${result.matchedCount.toLocaleString()} complete-dataset rows match the threshold.`);
+      return result;
     } catch (caught) {
       setError(messageFrom(caught));
+      throw caught;
     }
   }
 
   async function createProfile(axis: "x" | "y" | "z", field = activeField) {
-    if (!metadata) return;
+    if (!metadata) throw new Error("Upload a dataset before creating a profile.");
     setIsAnalyzing(true);
     setError(null);
     try {
       const result = await executeDatasetAction<ProfileResult>(metadata.datasetId, "profile", { field, axis });
       setProfile(result);
       setNotice(`Created a ${result.points.length}-point centerline profile.`);
+      return result;
     } catch (caught) {
       setError(messageFrom(caught));
+      throw caught;
     } finally {
       setIsAnalyzing(false);
     }
   }
 
   async function focusLocation(location: { x: number; y: number; z?: number }) {
-    if (!metadata) return;
+    if (!metadata) throw new Error("Upload a dataset before selecting a point.");
     const result = await executeDatasetAction<NearestPointResult>(metadata.datasetId, "nearest_point", location);
     setSelectedPoint({ rowIndex: result.rowIndex, location: result.location, values: result.values });
+    return result;
   }
 
-  async function executeAssistantAction(action: AIAction) {
-    if (!metadata) return;
-    if (action.type === "change_field") return changeField(action.field);
-    if (action.type === "set_threshold") return applyThreshold(action);
-    if (action.type === "reset_view") {
-      setThreshold(null); setFilterMatchCount(null); setSelectedPoint(null); setResetNonce((value) => value + 1); return;
-    }
-    if (action.type === "focus_point") return focusLocation(action);
-    if (action.type === "create_profile") return createProfile(action.axis, action.field);
-    if (action.type === "statistics") {
-      await loadStatistics(metadata.datasetId, action.field); return;
-    }
-    const result = await executeDatasetAction<ExtremeResult>(metadata.datasetId, action.type, { field: action.field });
-    await focusLocation(result.location);
-    setNotice(`${action.field} ${action.type === "find_max" ? "maximum" : "minimum"}: ${formatNumber(result.value)} at row ${result.rowIndex}.`);
+  function resetVisualization() {
+    setThreshold(null);
+    setFilterMatchCount(null);
+    setSelectedPoint(null);
+    setResetNonce((value) => value + 1);
   }
 
-  async function handleAssistantCommand(message: string): Promise<string> {
+  async function handleAssistantCommand(
+    message: string,
+    history: AIConversationMessage[],
+  ): Promise<string> {
     if (!metadata) throw new Error("Upload a dataset before using the assistant.");
-    const response = await requestAssistantActions(message, metadata, activeField);
-    for (const action of response.actions) await executeAssistantAction(action);
-    return response.message;
+    const visualization: AIVisualizationContext = {
+      activeField,
+      representation,
+      threshold,
+      selectedLocation: selectedPoint?.location ?? null,
+    };
+    const response = await requestAssistantActions(message, metadata, visualization, history);
+    const execution = await executeAIActions(response.actions, {
+      datasetId: metadata.datasetId,
+      visualization,
+      changeField,
+      applyThreshold,
+      createProfile,
+      focusLocation,
+      loadStatistics: (field) => loadStatistics(metadata.datasetId, field),
+      resetView: resetVisualization,
+      setNotice,
+    });
+
+    if (!execution.verifiedResults.length) return response.message;
+
+    try {
+      const explained = await requestAssistantActions(
+        message,
+        metadata,
+        execution.visualization,
+        history,
+        execution.verifiedResults,
+      );
+      await executeAIActions(explained.actions, {
+        datasetId: metadata.datasetId,
+        visualization: execution.visualization,
+        changeField,
+        applyThreshold,
+        createProfile,
+        focusLocation,
+        loadStatistics: (field) => loadStatistics(metadata.datasetId, field),
+        resetView: resetVisualization,
+        setNotice,
+      });
+      return explained.message;
+    } catch {
+      // The requested actions already succeeded. Keep their original model message
+      // if optional verified-result narration is unavailable.
+      return response.message;
+    }
   }
 
   return (
@@ -247,7 +289,7 @@ export function ExplorerWorkspace() {
                   <div className="absolute left-3 top-3 flex gap-2"><span className="rounded-md border border-[#c6d5df] bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#526f82] shadow-sm backdrop-blur">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-[#edcfa6] bg-[#fff7e9] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a15b17]">visual sample</span>}</div>
                 </div>
                 <div className="flex flex-col gap-3 border-t border-[#d7e2ea] bg-[#fbfdfe] p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <ThresholdControls field={activeField} onApply={(value) => void applyThreshold(value)} onClear={() => { setThreshold(null); setFilterMatchCount(null); }} threshold={threshold} />
+                  <ThresholdControls field={activeField} onApply={(value) => void applyThreshold(value).catch(() => undefined)} onClear={() => { setThreshold(null); setFilterMatchCount(null); }} threshold={threshold} />
                   {filterMatchCount !== null && <p className="shrink-0 text-xs text-[#567184]">{filterMatchCount.toLocaleString()} full-data matches</p>}
                 </div>
               </Panel>
@@ -260,7 +302,7 @@ export function ExplorerWorkspace() {
               <div className="space-y-2">
                 <div className="flex items-center justify-end gap-2">
                   <span className="mr-auto flex items-center gap-1.5 text-xs text-[#567184]"><Ruler className="text-[#0b7bb5]" size={14} /> Profile axis</span>
-                  {(["x", "y", ...(metadata.dimension === "3D" ? ["z"] : [])] as Array<"x" | "y" | "z">).map((axis) => <button className="min-h-9 rounded-md border border-[#b9cbd7] bg-white px-3 text-xs font-bold uppercase text-[#294b63] shadow-sm hover:border-[#0b7bb5] hover:bg-[#eef7fa] hover:text-[#0b5f9e] focus-visible:ring-2 focus-visible:ring-[#0b9fc2] focus-visible:ring-offset-2" key={axis} onClick={() => void createProfile(axis)} type="button">{axis}</button>)}
+                  {(["x", "y", ...(metadata.dimension === "3D" ? ["z"] : [])] as Array<"x" | "y" | "z">).map((axis) => <button className="min-h-9 rounded-md border border-[#b9cbd7] bg-white px-3 text-xs font-bold uppercase text-[#294b63] shadow-sm hover:border-[#0b7bb5] hover:bg-[#eef7fa] hover:text-[#0b5f9e] focus-visible:ring-2 focus-visible:ring-[#0b9fc2] focus-visible:ring-offset-2" key={axis} onClick={() => void createProfile(axis).catch(() => undefined)} type="button">{axis}</button>)}
                 </div>
                 <ProfileChart profile={profile} />
               </div>

@@ -1,73 +1,110 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
-import { aiResponseSchema } from "@/lib/ai/schema";
+import {
+  aiChatRequestSchema,
+  aiResponseJsonSchema,
+  validateAIResponse,
+} from "@/lib/ai/schema";
+import { buildAIContextPrompt, COMSOL_AI_SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 
-const requestSchema = z.object({
-  message: z.string().trim().min(1).max(2_000),
-  fields: z.array(z.string().min(1)).min(1).max(200),
-  activeField: z.string().min(1),
-  dimension: z.enum(["2D", "3D"]),
-});
+type FocusLocation = { x: number; y: number; z?: number };
 
-function action(type: string, properties: Record<string, unknown>, required: string[]) {
-  return {
-    type: "object",
-    additionalProperties: false,
-    properties: { type: { type: "string", const: type }, ...properties },
-    required: ["type", ...required],
-  };
+function locationFitsDataset(
+  location: FocusLocation,
+  request: ReturnType<typeof aiChatRequestSchema.parse>,
+): boolean {
+  if (request.dataset.dimension === "2D" && location.z !== undefined) return false;
+  return request.dataset.coordinates.every((axis) => {
+    const value = location[axis];
+    const bounds = request.dataset.bounds[axis];
+    return value !== undefined && bounds !== undefined && value >= bounds[0] && value <= bounds[1];
+  });
 }
 
-const actionJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    message: { type: "string" },
-    actions: {
-      type: "array",
-      maxItems: 6,
-      items: {
-        oneOf: [
-          action("change_field", { field: { type: "string" } }, ["field"]),
-          action(
-            "set_threshold",
-            {
-              field: { type: "string" },
-              operator: { type: "string", enum: [">", ">=", "<", "<=", "=="] },
-              value: { type: "number" },
-            },
-            ["field", "operator", "value"],
-          ),
-          action("find_max", { field: { type: "string" } }, ["field"]),
-          action("find_min", { field: { type: "string" } }, ["field"]),
-          action("statistics", { field: { type: "string" } }, ["field"]),
-          action(
-            "create_profile",
-            { field: { type: "string" }, axis: { type: "string", enum: ["x", "y", "z"] } },
-            ["field", "axis"],
-          ),
-          action(
-            "focus_point",
-            { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } },
-            ["x", "y"],
-          ),
-          action("reset_view", {}, []),
-        ],
-      },
-    },
-  },
-  required: ["message", "actions"],
-} as const;
+function locationsMatch(left: FocusLocation, right: FocusLocation): boolean {
+  return left.x === right.x && left.y === right.y && left.z === right.z;
+}
+
+function focusPointHasProvenance(
+  location: FocusLocation,
+  request: ReturnType<typeof aiChatRequestSchema.parse>,
+): boolean {
+  const verifiedLocations = request.verifiedResults.flatMap((result): FocusLocation[] => {
+    if (result.action === "find_max" || result.action === "find_min" || result.action === "nearest_point") {
+      return [result.location];
+    }
+    if (result.action === "statistics") return [result.minLocation, result.maxLocation];
+    return [];
+  });
+  if (verifiedLocations.some((verified) => locationsMatch(location, verified))) return true;
+
+  const numbers = (request.message.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? [])
+    .map(Number)
+    .filter(Number.isFinite);
+  return request.dataset.coordinates.every((axis) => {
+    const coordinate = location[axis];
+    return coordinate !== undefined && numbers.includes(coordinate);
+  });
+}
+
+function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.parse>): boolean {
+  const expectedCoordinates = request.dataset.dimension === "3D" ? ["x", "y", "z"] : ["x", "y"];
+  if (
+    request.dataset.coordinates.length !== expectedCoordinates.length ||
+    !expectedCoordinates.every((axis) =>
+      request.dataset.coordinates.includes(axis as "x" | "y" | "z"),
+    )
+  ) {
+    return false;
+  }
+  if (
+    !request.dataset.coordinates.every((axis) => {
+      const bounds = request.dataset.bounds[axis];
+      return bounds !== undefined && bounds[0] <= bounds[1];
+    })
+  ) {
+    return false;
+  }
+  if (!request.dataset.availableFields.includes(request.visualization.activeField)) return false;
+  if (
+    request.visualization.threshold &&
+    !request.dataset.availableFields.includes(request.visualization.threshold.field)
+  ) {
+    return false;
+  }
+  if (
+    request.visualization.selectedLocation &&
+    !locationFitsDataset(request.visualization.selectedLocation, request)
+  ) {
+    return false;
+  }
+  return request.verifiedResults.every((result) => {
+    if ("field" in result && !request.dataset.availableFields.includes(result.field)) return false;
+    if (result.action === "find_max" || result.action === "find_min" || result.action === "nearest_point") {
+      return locationFitsDataset(result.location, request);
+    }
+    if (result.action === "statistics") {
+      return (
+        locationFitsDataset(result.minLocation, request) &&
+        locationFitsDataset(result.maxLocation, request)
+      );
+    }
+    if (result.action === "profile") {
+      return result.axis !== "z" || request.dataset.dimension === "3D";
+    }
+    return true;
+  });
+}
 
 export async function POST(request: Request) {
-  const parsedRequest = requestSchema.safeParse(await request.json().catch(() => null));
-  if (!parsedRequest.success) {
-    return NextResponse.json({ detail: "Invalid assistant request." }, { status: 400 });
+  const parsedRequest = aiChatRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsedRequest.success || !requestContextIsValid(parsedRequest.data)) {
+    return NextResponse.json({ detail: "Invalid assistant request context." }, { status: 400 });
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY;
   const model = process.env.OPENROUTER_MODEL ?? "z-ai/glm-5.2";
+  const apiUrl = process.env.OPENROUTER_API_URL ?? "https://openrouter.ai/api/v1/chat/completions";
   if (!apiKey) {
     return NextResponse.json(
       { detail: "Set OPENROUTER_API_KEY in frontend/.env.local to enable the assistant." },
@@ -75,19 +112,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const { message, fields, activeField, dimension } = parsedRequest.data;
-  const systemPrompt = [
-    "You are the command interpreter for a COMSOL results explorer.",
-    "Return only actions from the supplied JSON schema.",
-    `The available scalar fields are exactly: ${JSON.stringify(fields)}.`,
-    `The active field is ${JSON.stringify(activeField)} and the dataset is ${dimension}.`,
-    "Never invent field names, coordinates, or scientific values.",
-    "Use numerical actions to ask the deterministic Python backend for calculations.",
-    "If a request cannot be represented safely, explain why and return an empty actions array.",
-  ].join("\n");
+  const assistantRequest = parsedRequest.data;
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -98,15 +126,21 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message },
+          { role: "system", content: COMSOL_AI_SYSTEM_PROMPT },
+          { role: "system", content: buildAIContextPrompt(assistantRequest) },
+          ...assistantRequest.history,
+          { role: "user", content: assistantRequest.message },
         ],
         temperature: 0,
-        max_tokens: 800,
+        max_tokens: 1_200,
         provider: { require_parameters: true },
         response_format: {
           type: "json_schema",
-          json_schema: { name: "comsol_visualization_actions", strict: true, schema: actionJsonSchema },
+          json_schema: {
+            name: "comsol_visualization_actions",
+            strict: true,
+            schema: aiResponseJsonSchema,
+          },
         },
       }),
     });
@@ -120,11 +154,15 @@ export async function POST(request: Request) {
     }
     const content = body.choices?.[0]?.message?.content;
     if (!content) throw new Error("OpenRouter returned an empty response.");
-    const validated = aiResponseSchema.parse(JSON.parse(content));
-    const unknownField = validated.actions.find(
-      (candidate) => "field" in candidate && !fields.includes(candidate.field),
+
+    const validated = validateAIResponse(JSON.parse(content), assistantRequest.dataset);
+    const unverifiedFocus = validated.actions.find(
+      (action) =>
+        action.type === "focus_point" && !focusPointHasProvenance(action, assistantRequest),
     );
-    if (unknownField) throw new Error("The assistant selected a field that is not in this dataset.");
+    if (unverifiedFocus) {
+      throw new Error("The assistant returned focus coordinates without a verified source.");
+    }
     return NextResponse.json(validated);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "The assistant response was invalid.";

@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { Bot, Send, Sparkles, User } from "lucide-react";
 
 import { Panel } from "@/components/ui/panel";
+import type { AIConversationMessage } from "@/lib/ai/schema";
 
 interface ChatMessage {
   id: number;
@@ -24,7 +25,7 @@ export function AssistantPanel({
   onCommand,
 }: {
   disabled: boolean;
-  onCommand: (message: string) => Promise<string>;
+  onCommand: (message: string, history: AIConversationMessage[]) => Promise<string>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -44,7 +45,8 @@ export function AssistantPanel({
     setInput("");
     setIsSending(true);
     try {
-      const response = await onCommand(value);
+      const history = messages.slice(-16).map(({ role, content }) => ({ role, content }));
+      const response = await onCommand(value, history);
       setMessages((current) => [...current, { id: id + 1, role: "assistant", content: response }]);
     } catch (error) {
       setMessages((current) => [
