@@ -8,7 +8,7 @@ The project is an MVP monorepo with no database and no authentication. Uploaded 
 
 - Frontend: Next.js 15, TypeScript, Tailwind CSS, vtk.js, Canvas, SVG, Zod
 - Backend: FastAPI, Pydantic, Pandas, NumPy, SciPy, Uvicorn
-- AI command interpreter: OpenRouter with `z-ai/glm-5.2`, called only from a Next.js server route
+- AI command interpreter: OpenRouter with `z-ai`, called only from a Next.js server route
 
 Python remains the source of truth for all numerical results. The language model can only return a validated set of visualization and analysis actions; it cannot execute code or calculate simulation values.
 
@@ -78,7 +78,7 @@ The minimum local frontend configuration is:
 ```dotenv
 NEXT_PUBLIC_API_URL=http://localhost:8000
 OPENROUTER_API_KEY=your-openrouter-key
-OPENROUTER_MODEL=z-ai/glm-5.2
+OPENROUTER_MODEL=z-ai
 ```
 
 `OPENROUTER_API_KEY` is server-only and must never be prefixed with `NEXT_PUBLIC_`. The application remains fully usable without it; only the assistant returns a configuration message.
