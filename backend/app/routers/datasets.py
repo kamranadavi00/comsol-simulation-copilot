@@ -1,11 +1,12 @@
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
-from app.schemas.datasets import ActionRequest, DatasetMetadata, PointDataResponse
+from app.schemas.datasets import ActionRequest, DatasetMetadata, MeshDataResponse, PointDataResponse
 from app.services.action_dispatcher import execute_action
-from app.services.dataset_service import get_points, register_dataset
+from app.services.dataset_service import get_mesh, get_points, register_dataset, register_dataset_files
 from app.services.exceptions import DatasetError, DatasetNotFoundError
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
@@ -36,7 +37,32 @@ async def upload_dataset(file: UploadFile = File(...)) -> DatasetMetadata:
         raise HTTPException(status_code=413, detail="The CSV exceeds the 50 MB upload limit.")
 
     try:
-        return register_dataset(payload, filename)
+        return await run_in_threadpool(register_dataset, payload, filename)
+    except DatasetError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/upload-mesh", response_model=DatasetMetadata, status_code=status.HTTP_201_CREATED)
+async def upload_mesh_dataset(files: list[UploadFile] = File(...)) -> DatasetMetadata:
+    if not 1 <= len(files) <= 6:
+        raise HTTPException(status_code=400, detail="Upload between one and six mesh CSV files.")
+    received: list[tuple[str, bytes]] = []
+    total_bytes = 0
+    for file in files:
+        filename = (file.filename or "").strip()
+        if not filename or not filename.lower().endswith(".csv"):
+            raise HTTPException(status_code=415, detail="Every mesh input must be a .csv file.")
+        remaining = settings.max_mesh_upload_bytes - total_bytes
+        payload = await file.read(remaining + 1)
+        await file.close()
+        if not payload:
+            raise HTTPException(status_code=400, detail=f"{filename} is empty.")
+        total_bytes += len(payload)
+        if total_bytes > settings.max_mesh_upload_bytes:
+            raise HTTPException(status_code=413, detail="The combined mesh CSV files exceed the configured mesh upload limit.")
+        received.append((filename, payload))
+    try:
+        return await run_in_threadpool(register_dataset_files, received)
     except DatasetError as error:
         raise _http_error(error) from error
 
@@ -48,6 +74,14 @@ async def dataset_points(
 ) -> PointDataResponse:
     try:
         return get_points(dataset_id, max_points)
+    except DatasetError as error:
+        raise _http_error(error) from error
+
+
+@router.get("/{dataset_id}/mesh", response_model=MeshDataResponse)
+async def dataset_mesh(dataset_id: str) -> MeshDataResponse:
+    try:
+        return get_mesh(dataset_id)
     except DatasetError as error:
         raise _http_error(error) from error
 

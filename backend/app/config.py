@@ -14,7 +14,7 @@ def _frontend_origins() -> list[str]:
 class Settings:
     frontend_origins: list[str] = field(default_factory=_frontend_origins)
     max_upload_bytes: int = 50 * 1024 * 1024
+    max_mesh_upload_bytes: int = int(os.getenv("MAX_MESH_UPLOAD_MB", "512")) * 1024 * 1024
 
 
 settings = Settings()
-

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Activity, Box, CheckCircle2, CircleAlert, Database, FileSpreadsheet, Loader2, Orbit, Ruler, Wifi, WifiOff } from "lucide-react";
 
 import { ProbePanel } from "@/components/analysis/probe-panel";
+import { MeshSelectionPanel } from "@/components/analysis/mesh-selection-panel";
+import { MeshStatisticsPanel } from "@/components/analysis/mesh-statistics-panel";
 import { StatisticsPanel } from "@/components/analysis/statistics-panel";
 import { ProfileChart } from "@/components/charts/profile-chart";
 import { AssistantPanel } from "@/components/chat/assistant-panel";
@@ -11,6 +13,7 @@ import { Panel } from "@/components/ui/panel";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import { FieldSelector } from "@/components/viewer/field-selector";
 import { SimulationViewer } from "@/components/viewer/simulation-viewer";
+import { DEFAULT_MESH_SETTINGS, MeshSettingsPanel } from "@/components/viewer/mesh-settings";
 import { ThresholdControls } from "@/components/viewer/threshold-controls";
 import { ViewerControls } from "@/components/viewer/viewer-controls";
 import { executeAIActions, formatVerifiedResults } from "@/lib/ai/action-executor";
@@ -21,12 +24,17 @@ import {
   checkBackend,
   executeDatasetAction,
   loadDatasetPoints,
+  loadDatasetMesh,
   uploadDataset,
+  uploadMeshDataset,
 } from "@/lib/api/datasets";
-import { filteredPointData, pointAt } from "@/lib/visualization";
+import { filteredPointData, finiteRange, pointAt } from "@/lib/visualization";
 import type {
   DatasetMetadata,
   FilterResult,
+  MeshData,
+  MeshSelection,
+  MeshSettings,
   NearestPointResult,
   PointData,
   ProfileResult,
@@ -34,6 +42,7 @@ import type {
   SelectedPoint,
   StatisticsResult,
   Threshold,
+  VisualizationMode,
 } from "@/types/datasets";
 
 type Connection = "checking" | "connected" | "disconnected";
@@ -46,6 +55,10 @@ export function ExplorerWorkspace() {
   const [connection, setConnection] = useState<Connection>("checking");
   const [metadata, setMetadata] = useState<DatasetMetadata | null>(null);
   const [points, setPoints] = useState<PointData | null>(null);
+  const [mesh, setMesh] = useState<MeshData | null>(null);
+  const [meshSettings, setMeshSettings] = useState<MeshSettings>(DEFAULT_MESH_SETTINGS);
+  const [visualizationMode, setVisualizationMode] = useState<VisualizationMode>("field");
+  const [meshSelection, setMeshSelection] = useState<MeshSelection | null>(null);
   const [activeField, setActiveField] = useState("");
   const [representation, setRepresentation] = useState<Representation>("points");
   const [threshold, setThreshold] = useState<Threshold | null>(null);
@@ -60,6 +73,7 @@ export function ExplorerWorkspace() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [uploadStage, setUploadStage] = useState<string | null>(null);
 
   useEffect(() => {
     checkBackend().then(() => setConnection("connected")).catch(() => setConnection("disconnected"));
@@ -74,6 +88,21 @@ export function ExplorerWorkspace() {
     const highlighted = new Set(highlightedRowIndexes);
     return visiblePoints.rowIndexes.filter((rowIndex) => highlighted.has(rowIndex)).length;
   }, [highlightedRowIndexes, visiblePoints]);
+  const activeFieldRange = useMemo(() => finiteRange(mesh?.nodeFields[activeField] ?? []), [activeField, mesh]);
+  const hasVectorField = useMemo(() => {
+    const axesByBase = new Map<string, Set<string>>();
+    const normalizedFields = new Set<string>();
+    metadata?.fields.forEach((field) => {
+      const normalized = field.toLowerCase().replace(/\[[^\]]*\]|\([^)]*\)/g, "").replace(/[^a-z0-9]/g, "");
+      normalizedFields.add(normalized);
+      const match = normalized.match(/^(.*)(x|y|z)$/);
+      if (!match?.[1]) return;
+      const axes = axesByBase.get(match[1]) ?? new Set<string>();
+      axes.add(match[2]);
+      axesByBase.set(match[1], axes);
+    });
+    return (normalizedFields.has("u") && normalizedFields.has("v") && normalizedFields.has("w")) || [...axesByBase.values()].some((axes) => axes.has("x") && axes.has("y") && axes.has("z"));
+  }, [metadata]);
 
   async function loadStatistics(datasetId: string, field: string) {
     setIsAnalyzing(true);
@@ -86,16 +115,34 @@ export function ExplorerWorkspace() {
     }
   }
 
-  async function handleUpload(file: File) {
+  async function handleUpload(files: File[]) {
     setIsUploading(true);
+    const processingStages = files.length > 1
+      ? ["Reading mesh", "Parsing nodes", "Parsing elements", "Building connectivity", "Extracting surface"]
+      : ["Reading dataset", "Detecting coordinates", "Detecting mesh connectivity"];
+    let stageIndex = 0;
+    setUploadStage(processingStages[stageIndex]);
+    const stageTimer = window.setInterval(() => {
+      stageIndex = Math.min(stageIndex + 1, processingStages.length - 1);
+      setUploadStage(processingStages[stageIndex]);
+    }, 650);
     setError(null);
     setNotice(null);
     try {
-      const nextMetadata = await uploadDataset(file);
-      const nextPoints = await loadDatasetPoints(nextMetadata.datasetId);
+      const nextMetadata = files.length > 1 ? await uploadMeshDataset(files) : await uploadDataset(files[0]);
+      window.clearInterval(stageTimer);
+      setUploadStage(nextMetadata.mesh ? "Preparing GPU buffers" : "Preparing visualization sample");
+      const [nextPoints, nextMesh] = await Promise.all([
+        loadDatasetPoints(nextMetadata.datasetId),
+        nextMetadata.mesh ? loadDatasetMesh(nextMetadata.datasetId) : Promise.resolve(null),
+      ]);
       const field = nextMetadata.fields[0];
       setMetadata(nextMetadata);
       setPoints(nextPoints);
+      setMesh(nextMesh);
+      setMeshSettings({ ...DEFAULT_MESH_SETTINGS });
+      setVisualizationMode(nextMesh ? "mesh" : "field");
+      setMeshSelection(null);
       setActiveField(field);
       setThreshold(null);
       setSelectedPoint(null);
@@ -105,12 +152,18 @@ export function ExplorerWorkspace() {
       setHighlightedRegion(null);
       setConnection("connected");
       await loadStatistics(nextMetadata.datasetId, field);
-      setNotice(`${nextMetadata.filename} loaded with ${nextMetadata.rowCount.toLocaleString()} valid rows.`);
+      setNotice(nextMesh
+        ? `Original COMSOL mesh reconstructed: ${nextMesh.statistics.nodeCount.toLocaleString()} nodes and ${nextMesh.statistics.elementCount.toLocaleString()} elements.`
+        : `${nextMetadata.filename} loaded with ${nextMetadata.rowCount.toLocaleString()} valid rows. Mesh connectivity is not available in this dataset.`);
+      return true;
     } catch (caught) {
       setError(messageFrom(caught));
       setConnection("disconnected");
+      return false;
     } finally {
+      window.clearInterval(stageTimer);
       setIsUploading(false);
+      setUploadStage(null);
     }
   }
 
@@ -125,6 +178,7 @@ export function ExplorerWorkspace() {
     setError(null);
     setHighlightedRowIndexes([]);
     setHighlightedRegion(null);
+    setMeshSelection(null);
     if (!fieldChanged) return;
     try {
       await loadStatistics(metadata.datasetId, field);
@@ -207,6 +261,20 @@ export function ExplorerWorkspace() {
       await executeDatasetAction<NearestPointResult>(metadata.datasetId, "nearest_point", location),
     );
     setSelectedPoint({ rowIndex: result.rowIndex, location: result.location, values: result.values });
+    if (mesh && result.rowIndex < mesh.nodeIds.length) {
+      setMeshSelection({
+        kind: "node",
+        nodeIndex: result.rowIndex,
+        nodeId: mesh.nodeIds[result.rowIndex],
+        location: {
+          x: result.location.x,
+          y: result.location.y,
+          z: result.location.z ?? mesh.coordinates.z[result.rowIndex] ?? 0,
+        },
+        values: result.values,
+      });
+      setMeshSettings((current) => ({ ...current, showNodes: true, selectionMode: "node" }));
+    }
     return result;
   }
 
@@ -216,6 +284,8 @@ export function ExplorerWorkspace() {
     setSelectedPoint(null);
     setHighlightedRowIndexes([]);
     setHighlightedRegion(null);
+    setMeshSelection(null);
+    setMeshSettings((current) => ({ ...current, clip: { x: null, y: null, z: null } }));
     setResetNonce((value) => value + 1);
   }
 
@@ -291,6 +361,8 @@ export function ExplorerWorkspace() {
           </div>
         )}
 
+        {uploadStage && <div className="flex items-center gap-2 rounded-lg border border-[#b9d8e5] bg-[#eaf6fa] px-4 py-3 text-sm font-medium text-[#0b6f9f]" role="status"><Loader2 className="animate-spin" size={16} />{uploadStage}…</div>}
+
         {!metadata || !points ? (
           <div className="grid min-h-[calc(100vh-150px)] place-items-center py-8">
             <div className="w-full max-w-3xl">
@@ -314,28 +386,30 @@ export function ExplorerWorkspace() {
               <UploadDropzone compact isLoading={isUploading} onUpload={handleUpload} />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className={`grid gap-4 ${mesh ? "xl:grid-cols-[280px_minmax(0,1fr)_360px]" : "lg:grid-cols-[minmax(0,1fr)_360px]"}`}>
+              {mesh && <MeshSettingsPanel fieldRange={activeFieldRange} hasVectorField={hasVectorField} metadata={metadata} mode={visualizationMode} onFit={() => setResetNonce((value) => value + 1)} onModeChange={setVisualizationMode} onSettingsChange={setMeshSettings} settings={meshSettings} />}
               <Panel
-                action={<ViewerControls onRepresentationChange={setRepresentation} onReset={() => setResetNonce((value) => value + 1)} representation={representation} showRepresentation={metadata.dimension === "3D"} />}
+                action={<ViewerControls onRepresentationChange={setRepresentation} onReset={() => setResetNonce((value) => value + 1)} representation={representation} showRepresentation={!mesh && metadata.dimension === "3D"} />}
                 className="min-w-0 overflow-hidden"
-                eyebrow={`${metadata.dimension} visualization`}
-                title={`${activeField} scalar field`}
+                eyebrow={mesh ? "Original FEM topology" : `${metadata.dimension} visualization`}
+                title={mesh ? `${activeField} · ${visualizationMode === "mesh" ? "Mesh" : visualizationMode}` : `${activeField} scalar field`}
               >
-                <div className="relative min-h-[420px]">
-                  <SimulationViewer data={visiblePoints!} field={activeField} highlightedRowIndexes={highlightedRowIndexes} metadata={metadata} onSelect={selectPosition} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />
-                  <div className="absolute left-3 top-3 flex flex-wrap gap-2"><span className="rounded-md border border-[#c6d5df] bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#526f82] shadow-sm backdrop-blur">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-[#edcfa6] bg-[#fff7e9] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a15b17]">visual sample</span>}{visibleHighlightedCount > 0 && <span className="rounded-md border border-[#e8b591] bg-[#fff3ea] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a9472d]">{visibleHighlightedCount.toLocaleString()} visible highlights</span>}</div>
+                <div className={`relative ${mesh ? "min-h-[520px]" : "min-h-[420px]"}`}>
+                  <SimulationViewer data={visiblePoints!} field={activeField} highlightedRowIndexes={highlightedRowIndexes} mesh={mesh} meshSelection={meshSelection} meshSettings={meshSettings} metadata={metadata} onMeshSelect={setMeshSelection} onSelect={selectPosition} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} visualizationMode={visualizationMode} />
+                  {!mesh && <div className="absolute left-3 top-3 flex flex-wrap gap-2"><span className="rounded-md border border-[#c6d5df] bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#526f82] shadow-sm backdrop-blur">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-[#edcfa6] bg-[#fff7e9] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a15b17]">visual sample</span>}{visibleHighlightedCount > 0 && <span className="rounded-md border border-[#e8b591] bg-[#fff3ea] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a9472d]">{visibleHighlightedCount.toLocaleString()} visible highlights</span>}</div>}
                 </div>
-                <div className="flex flex-col gap-3 border-t border-[#d7e2ea] bg-[#fbfdfe] p-3 sm:flex-row sm:items-center sm:justify-between">
+                {!mesh && <div className="flex flex-col gap-3 border-t border-[#d7e2ea] bg-[#fbfdfe] p-3 sm:flex-row sm:items-center sm:justify-between">
                   <ThresholdControls field={activeField} onApply={(value) => void applyThreshold(value).catch(() => undefined)} onClear={() => { setThreshold(null); setFilterMatchCount(null); setHighlightedRowIndexes([]); setHighlightedRegion(null); }} threshold={threshold} />
                   {filterMatchCount !== null && <p className="shrink-0 text-xs text-[#567184]">{filterMatchCount.toLocaleString()} full-data matches</p>}
-                </div>
+                </div>}
               </Panel>
               <AssistantPanel disabled={!metadata || isUploading} onCommand={handleAssistantCommand} />
             </div>
 
+            {metadata.mesh && <MeshStatisticsPanel mesh={metadata.mesh} />}
             <StatisticsPanel isLoading={isAnalyzing} statistics={statistics} />
             <div className="grid gap-4 lg:grid-cols-2">
-              <ProbePanel onStep={stepSelection} point={selectedPoint} />
+              {mesh ? <MeshSelectionPanel selection={meshSelection} /> : <ProbePanel onStep={stepSelection} point={selectedPoint} />}
               <div className="space-y-2">
                 <div className="flex items-center justify-end gap-2">
                   <span className="mr-auto flex items-center gap-1.5 text-xs text-[#567184]"><Ruler className="text-[#0b7bb5]" size={14} /> Profile axis</span>

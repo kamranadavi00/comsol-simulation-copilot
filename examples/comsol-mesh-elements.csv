@@ -1,0 +1,3 @@
+element_id,element_type,node_1,node_2,node_3,node_4,domain_id,Element Energy [J]
+101,tetra,1,2,3,4,1,12.5
+102,tetra,2,3,4,5,2,18.75

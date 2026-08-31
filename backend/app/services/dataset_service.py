@@ -10,8 +10,15 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
-from app.schemas.datasets import CoordinateColumns, DatasetMetadata, PointCoordinates, PointDataResponse
+from app.schemas.datasets import CoordinateColumns, DatasetMetadata, MeshDataResponse, PointCoordinates, PointDataResponse
 from app.services.exceptions import DatasetNotFoundError, DatasetValidationError
+from app.services.mesh_service import (
+    MeshRecord,
+    has_mesh_connectivity,
+    has_node_table,
+    reconstruct_mesh,
+    serialize_mesh,
+)
 
 DATASET_DIR = Path(__file__).resolve().parents[2] / "temp" / "datasets"
 DATASET_DIR.mkdir(parents=True, exist_ok=True)
@@ -23,6 +30,7 @@ class DatasetRecord:
     filename: str
     dataframe: pd.DataFrame
     metadata: DatasetMetadata
+    mesh: MeshRecord | None = None
 
 
 _datasets: dict[str, DatasetRecord] = {}
@@ -147,13 +155,24 @@ def get_bounds(dataframe: pd.DataFrame, coordinates: CoordinateColumns) -> dict[
 
 def register_dataset(payload: bytes, filename: str) -> DatasetMetadata:
     dataframe = _parse_dataframe(payload)
-    coordinates = detect_coordinates(dataframe)
+    mesh: MeshRecord | None = None
+    if has_node_table(dataframe) and has_mesh_connectivity(dataframe):
+        dataframe, mesh_coordinates, mesh = reconstruct_mesh(dataframe, dataframe)
+        coordinates = CoordinateColumns(
+            x=mesh_coordinates["x"],
+            y=mesh_coordinates["y"],
+            z=mesh_coordinates.get("z"),
+        )
+    else:
+        coordinates = detect_coordinates(dataframe)
     coordinate_columns = list(_coordinate_map(coordinates).values())
     dataframe = dataframe.dropna(subset=coordinate_columns).reset_index(drop=True)
     if dataframe.empty:
         raise DatasetValidationError("No rows contain complete coordinate values.")
 
-    fields = detect_numeric_fields(dataframe, coordinates)
+    fields = mesh.node_fields if mesh else detect_numeric_fields(dataframe, coordinates)
+    if not fields:
+        raise DatasetValidationError("The mesh must contain at least one numeric node or element result field.")
     dataset_id = str(uuid4())
     path = DATASET_DIR / f"{dataset_id}.csv"
     path.write_bytes(payload)
@@ -166,12 +185,71 @@ def register_dataset(payload: bytes, filename: str) -> DatasetMetadata:
         coordinateColumns=coordinates,
         fields=fields,
         bounds=get_bounds(dataframe, coordinates),
+        mesh=mesh.statistics if mesh else None,
     )
     _datasets[dataset_id] = DatasetRecord(
         path=path,
         filename=filename,
         dataframe=dataframe,
         metadata=metadata,
+        mesh=mesh,
+    )
+    return metadata
+
+
+def register_dataset_files(files: list[tuple[str, bytes]]) -> DatasetMetadata:
+    if not files:
+        raise DatasetValidationError("At least one CSV file is required.")
+    parsed = [(filename, _parse_dataframe(payload), payload) for filename, payload in files]
+    node_candidates = [item for item in parsed if has_node_table(item[1])]
+    element_candidates = [item for item in parsed if has_mesh_connectivity(item[1])]
+    if not node_candidates or not element_candidates:
+        raise DatasetValidationError(
+            "Separate mesh upload requires a node table with node IDs/coordinates and an element table with connectivity."
+        )
+    node_name, node_frame, node_payload = node_candidates[0]
+    element_names = {filename for filename, _, _ in element_candidates}
+    element_frame = pd.concat(
+        [frame for _, frame, _ in element_candidates],
+        ignore_index=True,
+        sort=False,
+    )
+    result_frames = [
+        frame
+        for filename, frame, _ in parsed
+        if filename != node_name and filename not in element_names
+    ]
+    dataframe, mesh_coordinates, mesh = reconstruct_mesh(node_frame, element_frame, result_frames)
+    coordinates = CoordinateColumns(
+        x=mesh_coordinates["x"],
+        y=mesh_coordinates["y"],
+        z=mesh_coordinates.get("z"),
+    )
+    coordinate_names = list(_coordinate_map(coordinates).values())
+    dataframe = dataframe.dropna(subset=coordinate_names).reset_index(drop=True)
+    if not mesh.node_fields:
+        raise DatasetValidationError("The mesh must contain at least one numeric node or element result field.")
+
+    dataset_id = str(uuid4())
+    path = DATASET_DIR / f"{dataset_id}.csv"
+    path.write_bytes(node_payload)
+    display_name = " + ".join(filename for filename, _, _ in parsed)
+    metadata = DatasetMetadata(
+        datasetId=dataset_id,
+        filename=display_name,
+        rowCount=len(dataframe),
+        dimension="3D" if coordinates.z else "2D",
+        coordinateColumns=coordinates,
+        fields=mesh.node_fields,
+        bounds=get_bounds(dataframe, coordinates),
+        mesh=mesh.statistics,
+    )
+    _datasets[dataset_id] = DatasetRecord(
+        path=path,
+        filename=display_name,
+        dataframe=dataframe,
+        metadata=metadata,
+        mesh=mesh,
     )
     return metadata
 
@@ -224,6 +302,20 @@ def get_points(dataset_id: str, max_points: int) -> PointDataResponse:
     )
 
 
+def get_mesh(dataset_id: str) -> MeshDataResponse:
+    record = get_record(dataset_id)
+    if record.mesh is None:
+        raise DatasetValidationError(
+            "Mesh connectivity is not available in this dataset. The exact COMSOL mesh cannot be recovered from coordinates alone."
+        )
+    return serialize_mesh(
+        dataset_id,
+        record.dataframe,
+        record.metadata.coordinate_columns,
+        record.mesh,
+    )
+
+
 def serialize_location(row: pd.Series, coordinates: CoordinateColumns) -> dict[str, float]:
     location = {"x": float(row[coordinates.x]), "y": float(row[coordinates.y])}
     if coordinates.z:
@@ -237,4 +329,3 @@ def ensure_field(record: DatasetRecord, field: Any) -> str:
     if field not in record.metadata.fields:
         raise DatasetValidationError(f"Field '{field}' is missing or is not a usable numeric field.")
     return field
-

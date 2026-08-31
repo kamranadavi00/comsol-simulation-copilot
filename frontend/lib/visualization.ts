@@ -9,10 +9,14 @@ const SCIENTIFIC_SCALE: Array<[number, number, number]> = [
 ];
 
 export function finiteRange(values: Array<number | null>): [number, number] {
-  const usable = values.filter((value): value is number => value !== null && Number.isFinite(value));
-  if (!usable.length) return [0, 1];
-  const min = Math.min(...usable);
-  const max = Math.max(...usable);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (value === null || !Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [0, 1];
   return min === max ? [min, min + 1] : [min, max];
 }
 

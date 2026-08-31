@@ -1,5 +1,7 @@
 export type Dimension = "2D" | "3D";
 export type Representation = "surface" | "points" | "wireframe";
+export type VisualizationMode = "field" | "surface" | "slice" | "isosurface" | "streamlines" | "vector" | "mesh";
+export type MeshRenderType = "wireframe" | "surface" | "volume" | "field";
 export type ThresholdOperator = ">" | ">=" | "<" | "<=" | "==";
 
 export interface CoordinateColumns {
@@ -16,7 +18,84 @@ export interface DatasetMetadata {
   coordinateColumns: CoordinateColumns;
   fields: string[];
   bounds: Record<string, [number, number]>;
+  mesh?: MeshMetadata | null;
 }
+
+export interface MeshMetadata {
+  available: true;
+  source: "original";
+  nodeCount: number;
+  elementCount: number;
+  elementTypeCounts: Record<string, number>;
+  domainCount?: number | null;
+  boundaryCount?: number | null;
+  meshDimension: "1D" | "2D" | "3D";
+  nodeFields: string[];
+  elementFields: string[];
+  visualizationTier: "full" | "surface" | "decimated" | "progressive";
+}
+
+export interface MeshData {
+  datasetId: string;
+  source: "original";
+  nodeIds: string[];
+  coordinates: { x: number[]; y: number[]; z: number[] };
+  nodeFields: Record<string, Array<number | null>>;
+  elementIds: string[];
+  elementTypes: string[];
+  elementOffsets: number[];
+  connectivity: number[];
+  domainIds: Array<string | null>;
+  boundaryIds: Array<string | null>;
+  elementFields: Record<string, Array<number | null>>;
+  surfaceTriangles: number[];
+  surfaceOwners: number[];
+  surfaceEdges: number[];
+  allEdges: number[];
+  statistics: MeshMetadata;
+}
+
+export interface MeshSettings {
+  renderType: MeshRenderType;
+  showMesh: boolean;
+  showSurfaceElements: boolean;
+  showInternalElements: boolean;
+  showEdges: boolean;
+  showNodes: boolean;
+  opacity: number;
+  edgeThickness: number;
+  nodeSize: number;
+  elementColoring: boolean;
+  clip: { x: number | null; y: number | null; z: number | null };
+  sliceAxis: "xy" | "xz" | "yz" | "custom";
+  customNormal: { x: number; y: number; z: number };
+  customPosition: number;
+  selectionMode: "element" | "node";
+  projection: "perspective" | "orthographic";
+  quality: "auto" | "high" | "balanced";
+  isoValue: number | null;
+  vectorScale: number;
+}
+
+export type MeshSelection =
+  | {
+      kind: "node";
+      nodeIndex: number;
+      nodeId: string;
+      location: { x: number; y: number; z: number };
+      values: Record<string, number>;
+    }
+  | {
+      kind: "element";
+      elementIndex: number;
+      elementId: string;
+      elementType: string;
+      nodeIds: string[];
+      domainId: string | null;
+      boundaryId: string | null;
+      centroid: { x: number; y: number; z: number };
+      values: Record<string, number>;
+    };
 
 export interface PointData {
   datasetId: string;

@@ -1,6 +1,6 @@
 # COMSOL AI Results Explorer
 
-A full-stack scientific workspace for uploading COMSOL CSV exports, exploring arbitrary detected scalar fields in 2D or 3D, running deterministic numerical analysis, and controlling existing tools with natural-language commands.
+A full-stack scientific workspace for uploading COMSOL CSV exports, reconstructing original FEM topology when connectivity is present, exploring arbitrary detected scalar fields in 2D or 3D, running deterministic numerical analysis, and controlling existing tools with natural-language commands.
 
 The project is an MVP monorepo with no database and no authentication. Uploaded datasets are cached in backend memory and copied to `backend/temp/datasets`; they disappear from the application registry whenever FastAPI restarts.
 
@@ -13,6 +13,22 @@ The project is an MVP monorepo with no database and no authentication. Uploaded 
 Python remains the source of truth for all numerical results. The language model can only return a validated set of visualization and analysis actions; it cannot execute code or calculate simulation values.
 
 The assistant receives the active dataset ID, exact detected field names, coordinate axes, bounds, current visualization state, recent conversation history, and—when applicable—verified FastAPI results. OpenRouter is constrained by a strict JSON schema, and the same response is validated again with Zod and dataset-aware field, axis, value, and coordinate checks before the centralized action executor runs it.
+
+## Original COMSOL mesh reconstruction
+
+The mesh pipeline never infers connectivity from spatial proximity. When node IDs and element connectivity are available, FastAPI reconstructs tetrahedral, triangular, hexahedral, quadrilateral, wedge/prism, pyramid, and line topology. Exterior volume faces are extracted by retaining faces with exactly one owner, then sent to a dedicated indexed vtk.js renderer.
+
+The viewer provides surface, wireframe, volume-edge, mesh-plus-field, marching-tetra isosurfaces, sampled vector fields, and true element-intersection slice views (XY/XZ/YZ/custom); smooth point-field interpolation; optional element coloring; nodes and internal edges; GPU clipping planes; mesh opacity/edge/node controls; perspective and orthographic cameras; LOD-oriented quality modes; verified mesh statistics; and node/element picking. Every exact mesh is labeled **Original COMSOL mesh**. Coordinate-only datasets continue to use the point renderer and explicitly report that connectivity is unavailable.
+
+Mesh inputs can be one combined CSV or a simultaneous selection of separate files:
+
+```text
+nodes.csv:    node_id, x, y, z
+elements.csv: element_id, element_type, node_1 ... node_8, domain_id, boundary_id
+results.csv:  node_id, temperature, pressure, velocity_x, velocity_y, velocity_z
+```
+
+Column matching is case- and punctuation-insensitive and accepts common variants such as `nodeId`, `elementId`, `vertex1`, and a delimited `connectivity` column. Select the three `examples/comsol-mesh-*.csv` files together for a quick mesh demo.
 
 ## Project structure
 
@@ -113,7 +129,7 @@ The chat panel has a bounded height, retains its full visible conversation, scro
 
 COMSOL-style leading `%` or `#` metadata lines are ignored. A commented coordinate header is recovered when possible.
 
-For a quick demo, upload `examples/comsol-sample.csv` (3D) or `examples/comsol-2d-sample.csv` (2D).
+For a quick point-data demo, upload `examples/comsol-sample.csv` (3D) or `examples/comsol-2d-sample.csv` (2D). For an original-topology demo, select the three `examples/comsol-mesh-*.csv` files together.
 
 ## API
 
@@ -133,6 +149,15 @@ Content-Type: multipart/form-data
 
 The form field is named `file`. The response contains the generated `datasetId`, detected dimension, coordinate columns, scalar fields, row count, and bounds.
 
+### Upload separate mesh tables
+
+```text
+POST /datasets/upload-mesh
+Content-Type: multipart/form-data
+```
+
+Append each CSV under the `files` form field. The combined mesh limit defaults to 512 MB and can be changed with `MAX_MESH_UPLOAD_MB`; ordinary single-table uploads remain limited to 50 MB. Node-associated results are joined by normalized node ID.
+
 ### Visualization points
 
 ```text
@@ -140,6 +165,14 @@ GET /datasets/{datasetId}/points?max_points=50000
 ```
 
 The response is columnar for efficient browser transfer. Large datasets are deterministically sampled for visualization only.
+
+### Original mesh topology
+
+```text
+GET /datasets/{datasetId}/mesh
+```
+
+Returns node coordinates and fields, compact element offsets/connectivity, element metadata and fields, exterior triangles with owner indexes, surface/internal edges, and mesh statistics. It returns an error rather than fabricating a mesh when connectivity is absent.
 
 ### Numerical actions
 

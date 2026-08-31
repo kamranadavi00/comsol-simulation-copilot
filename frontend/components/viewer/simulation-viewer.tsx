@@ -3,11 +3,16 @@
 import dynamic from "next/dynamic";
 
 import ScalarMap2D from "./scalar-map-2d";
-import type { DatasetMetadata, PointData, Representation, SelectedPoint } from "@/types/datasets";
+import type { DatasetMetadata, MeshData, MeshSelection, MeshSettings, PointData, Representation, SelectedPoint, VisualizationMode } from "@/types/datasets";
 
 const VtkViewer = dynamic(() => import("./vtk-viewer"), {
   ssr: false,
   loading: () => <div className="grid min-h-[420px] place-items-center bg-[#f7fafc] text-sm text-[#567184]">Loading 3D renderer…</div>,
+});
+
+const MeshViewer = dynamic(() => import("./mesh-viewer"), {
+  ssr: false,
+  loading: () => <div className="grid min-h-[520px] place-items-center bg-[#f7fafc] text-sm text-[#567184]">Preparing FEM mesh renderer…</div>,
 });
 
 export function SimulationViewer({
@@ -17,8 +22,13 @@ export function SimulationViewer({
   representation,
   selectedPoint,
   highlightedRowIndexes,
+  mesh,
+  meshSettings,
+  visualizationMode,
+  meshSelection,
   resetNonce,
   onSelect,
+  onMeshSelect,
 }: {
   metadata: DatasetMetadata;
   data: PointData;
@@ -26,9 +36,17 @@ export function SimulationViewer({
   representation: Representation;
   selectedPoint: SelectedPoint | null;
   highlightedRowIndexes: number[];
+  mesh: MeshData | null;
+  meshSettings: MeshSettings;
+  visualizationMode: VisualizationMode;
+  meshSelection: MeshSelection | null;
   resetNonce: number;
   onSelect: (position: number) => void;
+  onMeshSelect: (selection: MeshSelection | null) => void;
 }) {
+  if (mesh) {
+    return <MeshViewer field={field} highlightedNodeIndexes={highlightedRowIndexes} mesh={mesh} mode={visualizationMode} onSelect={onMeshSelect} resetNonce={resetNonce} selection={meshSelection} settings={meshSettings} />;
+  }
   return metadata.dimension === "3D" ? (
     <VtkViewer data={data} field={field} highlightedRowIndexes={highlightedRowIndexes} onSelect={onSelect} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />
   ) : (
