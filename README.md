@@ -114,7 +114,9 @@ User chat -> Next.js server route -> GLM-5.2 structured JSON
           -> optional verified-result explanation
 ```
 
-Extrema are calculated before the viewer changes state, then their verified row/location drives the selection marker and camera focus. AI `filter` actions are evaluated over the complete DataFrame; FastAPI also returns the verified matches for the current visual sample so Canvas and VTK can emphasize those points without hiding the surrounding simulation context. Chat results are formatted from the returned backend values, not model-generated numbers.
+Extrema are calculated before the viewer changes state, then their verified row/location drives the selection marker and camera focus. AI `filter` actions are evaluated by FastAPI over the complete dataset. Point-cloud datasets return verified rows for the current visual sample. Real mesh datasets instead return point/cell association, matching original IDs, exact serialized mesh indexes, and selection bounds; vtk.js renders those cells in a separate highlight actor while leaving the base mesh visible. Chat results are formatted from returned backend counts, not model-generated numbers.
+
+For point-associated mesh fields, the default nodal-to-cell selection mode is `average`: the predicate is applied to the mean of every cell's finite nodal values. This avoids expanding a region merely because one corner crosses the threshold. The execute endpoint also accepts `selectionMode: "any"` and `selectionMode: "all"`. Cell-associated fields are tested directly against their original element values. Metadata exposes the native associations as `mesh.pointFields` and `mesh.cellFields`; projected cell values in `mesh.nodeFields` exist only for optional smooth rendering and are never used in place of exact cell data during filtering.
 
 The chat panel has a bounded height, retains its full visible conversation, scrolls messages internally, and automatically follows new user, loading, result, and error messages without scrolling the page.
 
@@ -201,6 +203,22 @@ Supported actions:
 - `nearest_point`
 
 All actions use the complete cached DataFrame, including when the browser is displaying a downsampled point set.
+
+A mesh threshold request uses the same endpoint:
+
+```json
+{
+  "action": "filter",
+  "params": {
+    "field": "Temperature [K]",
+    "operator": ">",
+    "value": 300,
+    "selectionMode": "average"
+  }
+}
+```
+
+The response includes `association`, `matchedPointCount`, `matchedCellCount`, `matchedPointIds`, `matchedCellIds`, `matchedPointIndexes`, `matchedCellIndexes`, and `bounds`. Indexes refer exactly to the arrays returned by `GET /datasets/{datasetId}/mesh`; the original COMSOL IDs are included alongside them for provenance checks. The AI action intentionally contains none of these calculated IDs.
 
 ## Validation commands
 

@@ -20,6 +20,8 @@ class MeshMetadata(BaseModel):
     mesh_dimension: Literal["1D", "2D", "3D"] = Field(alias="meshDimension")
     node_fields: list[str] = Field(default_factory=list, alias="nodeFields")
     element_fields: list[str] = Field(default_factory=list, alias="elementFields")
+    point_fields: list[str] = Field(default_factory=list, alias="pointFields")
+    cell_fields: list[str] = Field(default_factory=list, alias="cellFields")
     visualization_tier: Literal["full", "surface", "decimated", "progressive"] = Field(
         alias="visualizationTier"
     )

@@ -47,18 +47,6 @@ function focusPointHasProvenance(
   });
 }
 
-function highlightedRowsHaveProvenance(
-  rowIndexes: number[],
-  request: ReturnType<typeof aiChatRequestSchema.parse>,
-): boolean {
-  const verifiedIndexes = new Set(
-    request.verifiedResults.flatMap((result) =>
-      result.action === "filter" ? result.rowIndexes : [],
-    ),
-  );
-  return rowIndexes.every((rowIndex) => verifiedIndexes.has(rowIndex));
-}
-
 function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.parse>): boolean {
   const expectedCoordinates = request.dataset.dimension === "3D" ? ["x", "y", "z"] : ["x", "y"];
   if (
@@ -117,7 +105,7 @@ function requestContextIsValid(request: ReturnType<typeof aiChatRequestSchema.pa
       return result.axis !== "z" || request.dataset.dimension === "3D";
     }
     if (result.action === "filter") {
-      return result.rowIndexes.every((rowIndex) => rowIndex < request.dataset.rowCount);
+      return (result.rowIndexes ?? []).every((rowIndex) => rowIndex < request.dataset.rowCount);
     }
     return true;
   });
@@ -189,14 +177,6 @@ export async function POST(request: Request) {
     );
     if (unverifiedFocus) {
       throw new Error("The assistant returned focus coordinates without a verified source.");
-    }
-    const unverifiedHighlight = validated.actions.find(
-      (action) =>
-        action.type === "highlight_points" &&
-        !highlightedRowsHaveProvenance(action.rowIndexes, assistantRequest),
-    );
-    if (unverifiedHighlight) {
-      throw new Error("The assistant returned point indexes without a verified source.");
     }
     return NextResponse.json(validated);
   } catch (error) {

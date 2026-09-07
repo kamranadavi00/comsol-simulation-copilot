@@ -33,6 +33,7 @@ import type {
   DatasetMetadata,
   FilterResult,
   MeshData,
+  MeshBounds,
   MeshSelection,
   MeshSettings,
   NearestPointResult,
@@ -67,6 +68,8 @@ export function ExplorerWorkspace() {
   const [profile, setProfile] = useState<ProfileResult | null>(null);
   const [filterMatchCount, setFilterMatchCount] = useState<number | null>(null);
   const [highlightedRowIndexes, setHighlightedRowIndexes] = useState<number[]>([]);
+  const [highlightedCellIndexes, setHighlightedCellIndexes] = useState<number[]>([]);
+  const [highlightBounds, setHighlightBounds] = useState<MeshBounds | null>(null);
   const [highlightedRegion, setHighlightedRegion] = useState<AIVisualizationContext["highlightedRegion"]>(null);
   const [resetNonce, setResetNonce] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -149,6 +152,8 @@ export function ExplorerWorkspace() {
       setProfile(null);
       setFilterMatchCount(null);
       setHighlightedRowIndexes([]);
+      setHighlightedCellIndexes([]);
+      setHighlightBounds(null);
       setHighlightedRegion(null);
       setConnection("connected");
       await loadStatistics(nextMetadata.datasetId, field);
@@ -177,6 +182,8 @@ export function ExplorerWorkspace() {
     setProfile(null);
     setError(null);
     setHighlightedRowIndexes([]);
+    setHighlightedCellIndexes([]);
+    setHighlightBounds(null);
     setHighlightedRegion(null);
     setMeshSelection(null);
     if (!fieldChanged) return;
@@ -222,20 +229,50 @@ export function ExplorerWorkspace() {
     if (!metadata) throw new Error("Upload a dataset before highlighting a region.");
     setError(null);
     try {
-      const result = await executeDatasetAction<FilterResult>(metadata.datasetId, "filter", {
-        ...nextThreshold,
-        visualRowIndexes: points?.rowIndexes ?? [],
-      });
+      const result = await executeDatasetAction<FilterResult>(
+        metadata.datasetId,
+        "filter",
+        mesh
+          ? { ...nextThreshold, selectionMode: "average" }
+          : { ...nextThreshold, visualRowIndexes: points?.rowIndexes ?? [] },
+      );
+      const cellIndexes = result.matchedCellIndexes ?? [];
+      if (mesh) {
+        if (!result.association || !result.matchedCellIndexes || !result.matchedCellIds) {
+          throw new Error("The backend did not return a complete verified mesh selection.");
+        }
+        if (result.matchedCellIds.length !== cellIndexes.length) {
+          throw new Error("The backend returned inconsistent mesh selection IDs and indexes.");
+        }
+        const mappingIsExact = cellIndexes.every(
+          (cellIndex, position) => mesh.elementIds[cellIndex] === result.matchedCellIds?.[position],
+        );
+        if (!mappingIsExact) throw new Error("The backend mesh selection does not match the rendered element IDs.");
+      }
       setThreshold(null);
-      setHighlightedRowIndexes(result.rowIndexes);
+      setHighlightedRowIndexes(result.rowIndexes ?? []);
+      setHighlightedCellIndexes(cellIndexes);
+      setHighlightBounds(result.bounds ?? null);
       setHighlightedRegion({ ...nextThreshold, matchedCount: result.matchedCount });
       setFilterMatchCount(result.matchedCount);
-      setNotice(`${result.matchedCount.toLocaleString()} verified rows match and are highlighted.`);
+      setNotice(mesh
+        ? `${(result.matchedCellCount ?? result.matchedCount).toLocaleString()} verified mesh elements match and are highlighted.`
+        : `${result.matchedCount.toLocaleString()} verified rows match and are highlighted.`);
       return result;
     } catch (caught) {
       setError(messageFrom(caught));
       throw caught;
     }
+  }
+
+  function clearFilter() {
+    setThreshold(null);
+    setFilterMatchCount(null);
+    setHighlightedRowIndexes([]);
+    setHighlightedCellIndexes([]);
+    setHighlightBounds(null);
+    setHighlightedRegion(null);
+    setNotice(mesh ? "Mesh threshold highlight cleared." : "Threshold highlight cleared.");
   }
 
   async function createProfile(axis: "x" | "y" | "z", field = activeField) {
@@ -283,6 +320,8 @@ export function ExplorerWorkspace() {
     setFilterMatchCount(null);
     setSelectedPoint(null);
     setHighlightedRowIndexes([]);
+    setHighlightedCellIndexes([]);
+    setHighlightBounds(null);
     setHighlightedRegion(null);
     setMeshSelection(null);
     setMeshSettings((current) => ({ ...current, clip: { x: null, y: null, z: null } }));
@@ -316,7 +355,7 @@ export function ExplorerWorkspace() {
         visualization,
         changeField,
         highlightRegion,
-        highlightPoints: setHighlightedRowIndexes,
+        clearFilter,
         createProfile,
         focusLocation,
         loadStatistics: (field) => loadStatistics(metadata.datasetId, field),
@@ -328,6 +367,8 @@ export function ExplorerWorkspace() {
       setThreshold(threshold);
       setHighlightedRegion(highlightedRegion);
       setHighlightedRowIndexes(highlightedRowIndexes);
+      setHighlightedCellIndexes(highlightedCellIndexes);
+      setHighlightBounds(highlightBounds);
       setSelectedPoint(selectedPoint);
       setFilterMatchCount(filterMatchCount);
       setStatistics(statistics);
@@ -395,13 +436,18 @@ export function ExplorerWorkspace() {
                 title={mesh ? `${activeField} · ${visualizationMode === "mesh" ? "Mesh" : visualizationMode}` : `${activeField} scalar field`}
               >
                 <div className={`relative ${mesh ? "min-h-[520px]" : "min-h-[420px]"}`}>
-                  <SimulationViewer data={visiblePoints!} field={activeField} highlightedRowIndexes={highlightedRowIndexes} mesh={mesh} meshSelection={meshSelection} meshSettings={meshSettings} metadata={metadata} onMeshSelect={setMeshSelection} onSelect={selectPosition} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} visualizationMode={visualizationMode} />
+                  <SimulationViewer data={visiblePoints!} field={activeField} highlightBounds={highlightBounds} highlightedCellIndexes={highlightedCellIndexes} highlightedRowIndexes={highlightedRowIndexes} mesh={mesh} meshSelection={meshSelection} meshSettings={meshSettings} metadata={metadata} onMeshSelect={setMeshSelection} onSelect={selectPosition} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} visualizationMode={visualizationMode} />
                   {!mesh && <div className="absolute left-3 top-3 flex flex-wrap gap-2"><span className="rounded-md border border-[#c6d5df] bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#526f82] shadow-sm backdrop-blur">{visiblePoints!.returnedPoints.toLocaleString()} / {points.totalPoints.toLocaleString()} points</span>{points.downsampled && <span className="rounded-md border border-[#edcfa6] bg-[#fff7e9] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a15b17]">visual sample</span>}{visibleHighlightedCount > 0 && <span className="rounded-md border border-[#e8b591] bg-[#fff3ea] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#a9472d]">{visibleHighlightedCount.toLocaleString()} visible highlights</span>}</div>}
                 </div>
-                {!mesh && <div className="flex flex-col gap-3 border-t border-[#d7e2ea] bg-[#fbfdfe] p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <ThresholdControls field={activeField} onApply={(value) => void applyThreshold(value).catch(() => undefined)} onClear={() => { setThreshold(null); setFilterMatchCount(null); setHighlightedRowIndexes([]); setHighlightedRegion(null); }} threshold={threshold} />
-                  {filterMatchCount !== null && <p className="shrink-0 text-xs text-[#567184]">{filterMatchCount.toLocaleString()} full-data matches</p>}
-                </div>}
+                <div className="flex flex-col gap-3 border-t border-[#d7e2ea] bg-[#fbfdfe] p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <ThresholdControls
+                    field={activeField}
+                    onApply={(value) => void (mesh ? highlightRegion(value) : applyThreshold(value)).catch(() => undefined)}
+                    onClear={clearFilter}
+                    threshold={mesh && highlightedRegion ? { field: highlightedRegion.field, operator: highlightedRegion.operator, value: highlightedRegion.value } : threshold}
+                  />
+                  {filterMatchCount !== null && <p className="shrink-0 text-xs text-[#567184]">{filterMatchCount.toLocaleString()} {mesh ? "mesh element" : "full-data"} matches</p>}
+                </div>
               </Panel>
               <AssistantPanel disabled={!metadata || isUploading} onCommand={handleAssistantCommand} />
             </div>

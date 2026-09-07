@@ -40,6 +40,7 @@ class MeshRecord:
     node_ids: list[str]
     elements: list[MeshElement]
     node_fields: list[str]
+    point_fields: list[str]
     element_fields: list[str]
     surface_triangles: list[int]
     surface_owners: list[int]
@@ -263,7 +264,10 @@ def reconstruct_mesh(
 
     analysis = node_frame.copy()
     analysis["__mesh_node_id__"] = analysis[node_id_column].map(_id_string)
-    analysis = analysis.dropna(subset=["__mesh_node_id__", coordinates["x"], coordinates["y"]])
+    required_coordinates = [coordinates["x"], coordinates["y"]]
+    if "z" in coordinates:
+        required_coordinates.append(coordinates["z"])
+    analysis = analysis.dropna(subset=["__mesh_node_id__", *required_coordinates])
     analysis = analysis.drop_duplicates("__mesh_node_id__", keep="first").reset_index(drop=True)
 
     for result_frame in result_frames or []:
@@ -338,6 +342,9 @@ def reconstruct_mesh(
         detail = " All connectivity referenced unknown node IDs." if missing_references else ""
         raise DatasetValidationError(f"No valid finite elements could be reconstructed.{detail}")
 
+    excluded_node_columns = [node_id_column, "__mesh_node_id__", *coordinates.values(), *structural]
+    point_fields = _usable_numeric_fields(analysis, excluded_node_columns)
+
     # Element-associated results remain available as exact cell values, and are
     # also projected to incident nodes for the optional smooth field rendering.
     for field in element_fields:
@@ -357,7 +364,6 @@ def reconstruct_mesh(
             for index in range(len(analysis))
         ]
 
-    excluded_node_columns = [node_id_column, "__mesh_node_id__", *coordinates.values(), *structural]
     node_fields = _usable_numeric_fields(analysis, excluded_node_columns)
     surface_triangles, surface_owners, surface_edges, all_edges = _surface_topology(elements)
     type_counts = dict(Counter(element.element_type for element in elements))
@@ -379,6 +385,8 @@ def reconstruct_mesh(
         meshDimension=mesh_dimension,
         nodeFields=node_fields,
         elementFields=element_fields,
+        pointFields=point_fields,
+        cellFields=element_fields,
         visualizationTier=_tier(len(elements)),
     )
     analysis = analysis.drop(columns=["__mesh_node_id__"])
@@ -386,6 +394,7 @@ def reconstruct_mesh(
         node_ids=node_ids,
         elements=elements,
         node_fields=node_fields,
+        point_fields=point_fields,
         element_fields=element_fields,
         surface_triangles=surface_triangles,
         surface_owners=surface_owners,

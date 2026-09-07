@@ -19,7 +19,7 @@ import vtkOrientationMarkerWidget from "@kitware/vtk.js/Interaction/Widgets/Orie
 import { Corners } from "@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget/Constants";
 
 import { finiteRange, formatNumber } from "@/lib/visualization";
-import type { MeshData, MeshSelection, MeshSettings, VisualizationMode } from "@/types/datasets";
+import type { MeshBounds, MeshData, MeshSelection, MeshSettings, VisualizationMode } from "@/types/datasets";
 
 type MeshContext = {
   view: ReturnType<typeof vtkGenericRenderWindow.newInstance>;
@@ -53,6 +53,64 @@ const ELEMENT_EDGES: Record<string, Array<[number, number]>> = {
   wedge: [[0, 1], [1, 2], [2, 0], [3, 4], [4, 5], [5, 3], [0, 3], [1, 4], [2, 5]],
   pyramid: [[0, 1], [1, 2], [2, 3], [3, 0], [0, 4], [1, 4], [2, 4], [3, 4]],
 };
+
+const ELEMENT_FACES: Record<string, number[][]> = {
+  tetra: [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]],
+  hexahedron: [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]],
+  wedge: [[0, 2, 1], [3, 4, 5], [0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5]],
+  pyramid: [[0, 3, 2, 1], [0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]],
+};
+
+const VOLUME_ELEMENT_TYPES = new Set(Object.keys(ELEMENT_FACES));
+
+/** Build the visible boundary of the selected cells without changing mesh data. */
+function buildCellHighlight(mesh: MeshData, cellIndexes: number[]) {
+  const volumeFaces = new Map<string, { nodes: number[]; uses: number }>();
+  const surfaceFaces: number[][] = [];
+  const selectedLines: Array<[number, number]> = [];
+
+  for (const cellIndex of cellIndexes) {
+    if (cellIndex < 0 || cellIndex >= mesh.elementIds.length) continue;
+    const nodes = mesh.connectivity.slice(mesh.elementOffsets[cellIndex], mesh.elementOffsets[cellIndex + 1]);
+    const elementType = mesh.elementTypes[cellIndex];
+    if (VOLUME_ELEMENT_TYPES.has(elementType)) {
+      for (const localFace of ELEMENT_FACES[elementType]) {
+        const face = localFace.map((localIndex) => nodes[localIndex]).filter((node) => node !== undefined);
+        if (face.length < 3) continue;
+        const key = [...face].sort((left, right) => left - right).join(":");
+        const existing = volumeFaces.get(key);
+        if (existing) existing.uses += 1;
+        else volumeFaces.set(key, { nodes: face, uses: 1 });
+      }
+    } else if (elementType === "line" && nodes.length >= 2) {
+      selectedLines.push([nodes[0], nodes[1]]);
+    } else if (nodes.length >= 3) {
+      surfaceFaces.push(nodes);
+    }
+  }
+
+  const polygons = [
+    ...surfaceFaces,
+    ...[...volumeFaces.values()].filter((face) => face.uses === 1).map((face) => face.nodes),
+  ];
+  const triangles: number[] = [];
+  for (const face of polygons) {
+    for (let index = 1; index < face.length - 1; index += 1) {
+      triangles.push(3, face[0], face[index], face[index + 1]);
+    }
+  }
+  const lines = new Uint32Array(selectedLines.length * 3);
+  selectedLines.forEach(([start, end], index) => {
+    lines[index * 3] = 2;
+    lines[index * 3 + 1] = start;
+    lines[index * 3 + 2] = end;
+  });
+  const data = vtkPolyData.newInstance();
+  data.setPoints(vtkPointsFor(mesh));
+  data.setPolys(vtkCellArray.newInstance({ values: new Uint32Array(triangles) }));
+  data.setLines(vtkCellArray.newInstance({ values: lines }));
+  return data;
+}
 
 function buildSlice(mesh: MeshData, field: string, settings: MeshSettings) {
   const axis = settings.sliceAxis === "xy" ? "z" : settings.sliceAxis === "xz" ? "y" : settings.sliceAxis === "yz" ? "x" : null;
@@ -356,7 +414,8 @@ export default function MeshViewer({
   field,
   mode,
   settings,
-  highlightedNodeIndexes,
+  highlightedCellIndexes,
+  highlightBounds,
   resetNonce,
   selection,
   onSelect,
@@ -365,7 +424,8 @@ export default function MeshViewer({
   field: string;
   mode: VisualizationMode;
   settings: MeshSettings;
-  highlightedNodeIndexes: number[];
+  highlightedCellIndexes: number[];
+  highlightBounds: MeshBounds | null;
   resetNonce: number;
   selection: MeshSelection | null;
   onSelect: (selection: MeshSelection | null) => void;
@@ -411,9 +471,13 @@ export default function MeshViewer({
       edges.actor.getProperty().setColor(0.09, 0.17, 0.23);
       nodes.actor.getProperty().setColor(0.05, 0.36, 0.55);
       nodes.actor.getProperty().setRepresentationToPoints();
-      highlights.actor.getProperty().setRepresentationToPoints();
+      highlights.actor.getProperty().setRepresentationToSurface();
       highlights.actor.getProperty().setColor(0.9, 0.43, 0.04);
-      highlights.actor.getProperty().setPointSize(11);
+      highlights.actor.getProperty().setOpacity(0.92);
+      highlights.actor.getProperty().setEdgeVisibility(true);
+      highlights.actor.getProperty().setEdgeColor(0.55, 0.18, 0.02);
+      highlights.actor.getProperty().setLineWidth(2);
+      highlights.actor.setVisibility(false);
       selected.actor.getProperty().setColor(0.86, 0.19, 0.1);
       selected.actor.getProperty().setOpacity(0.95);
       slice.actor.getProperty().setEdgeColor(0.08, 0.15, 0.2);
@@ -585,20 +649,27 @@ export default function MeshViewer({
   useEffect(() => {
     const context = contextRef.current;
     if (!context) return;
-    const indexes = highlightedNodeIndexes.filter((index) => index >= 0 && index < mesh.nodeIds.length);
-    const data = vtkPolyData.newInstance();
-    data.setPoints(vtkPointsFor(mesh));
-    const verts = new Uint32Array(indexes.length * 2);
-    indexes.forEach((nodeIndex, position) => {
-      verts[position * 2] = 1;
-      verts[position * 2 + 1] = nodeIndex;
-    });
-    data.setVerts(vtkCellArray.newInstance({ values: verts }));
+    const indexes = highlightedCellIndexes.filter((index) => index >= 0 && index < mesh.elementIds.length);
+    const data = buildCellHighlight(mesh, indexes);
     context.highlightMapper.setInputData(data);
+    context.highlightMapper.setScalarVisibility(false);
     context.highlightActor.setVisibility(indexes.length > 0);
     context.surfaceActor.getProperty().setOpacity(indexes.length ? Math.min(settings.opacity, 0.38) : settings.opacity);
     context.view.getRenderWindow().render();
-  }, [highlightedNodeIndexes, mesh, settings.opacity]);
+  }, [highlightedCellIndexes, mesh, settings.opacity]);
+
+  useEffect(() => {
+    const context = contextRef.current;
+    if (!context || !highlightBounds || !highlightedCellIndexes.length) return;
+    const bounds: [number, number, number, number, number, number] = [
+      highlightBounds.x[0], highlightBounds.x[1],
+      highlightBounds.y[0], highlightBounds.y[1],
+      highlightBounds.z[0], highlightBounds.z[1],
+    ];
+    context.view.getRenderer().resetCamera(bounds);
+    context.view.getRenderer().resetCameraClippingRange(bounds);
+    context.view.getRenderWindow().render();
+  }, [highlightBounds, highlightedCellIndexes.length]);
 
   useEffect(() => {
     const context = contextRef.current;
@@ -670,7 +741,7 @@ export default function MeshViewer({
     if (!context) return;
     const showSurface = mode !== "slice" && mode !== "isosurface" && settings.showMesh && settings.showSurfaceElements && settings.renderType !== "wireframe";
     context.surfaceActor.setVisibility(showSurface);
-    context.surfaceActor.getProperty().setOpacity(highlightedNodeIndexes.length ? Math.min(settings.opacity, 0.38) : settings.opacity);
+    context.surfaceActor.getProperty().setOpacity(highlightedCellIndexes.length ? Math.min(settings.opacity, 0.38) : settings.opacity);
     context.surfaceActor.getProperty().setColor(0.57, 0.72, 0.8);
     context.edgeActor.setVisibility(mode !== "slice" && mode !== "isosurface" && settings.showMesh && settings.showEdges);
     context.edgeActor.getProperty().setLineWidth(settings.edgeThickness);
@@ -691,7 +762,7 @@ export default function MeshViewer({
     context.vectorMapper.setClippingPlanes(planes);
     context.view.getRenderer().resetCameraClippingRange();
     context.view.getRenderWindow().render();
-  }, [highlightedNodeIndexes.length, mode, settings]);
+  }, [highlightedCellIndexes.length, mode, settings]);
 
   useEffect(() => {
     const context = contextRef.current;
@@ -744,9 +815,10 @@ export default function MeshViewer({
   if (renderError) return <div className="grid min-h-[520px] place-items-center p-6 text-sm text-[#9b3528]">{renderError}</div>;
   return (
     <div className="relative h-full min-h-[520px] overflow-hidden bg-[#f6fafc]">
-      <div aria-label={`Original COMSOL FEM mesh with ${mesh.statistics.nodeCount} nodes and ${mesh.statistics.elementCount} elements.`} className="absolute inset-0 touch-none" ref={containerRef} role="img" tabIndex={0} />
+      <div aria-label={`Original COMSOL FEM mesh with ${mesh.statistics.nodeCount} nodes and ${mesh.statistics.elementCount} elements${highlightedCellIndexes.length ? ` and ${highlightedCellIndexes.length} threshold-selected elements highlighted` : ""}.`} className="absolute inset-0 touch-none" ref={containerRef} role="img" tabIndex={0} />
       {stage && <div className="absolute inset-0 z-10 grid place-items-center bg-white/70 text-sm font-medium text-[#0f7f8c] backdrop-blur-sm">{stage}…</div>}
       <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-[#b5ddd9] bg-[#edf8f6]/95 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#176c67] shadow-sm">Original COMSOL mesh</div>
+      {highlightedCellIndexes.length > 0 && <div className="pointer-events-none absolute bottom-12 left-3 rounded-md border border-[#e8b591] bg-[#fff3ea]/95 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#a9472d] shadow-sm">{highlightedCellIndexes.length.toLocaleString()} selected mesh elements</div>}
       <div className="pointer-events-none absolute bottom-3 left-1/2 hidden -translate-x-1/2 rounded-md border border-[#c6d5df] bg-white/92 px-2 py-1 font-mono text-[9px] text-[#526f82] shadow-sm lg:block">X {formatNumber(spatialBounds.x[0])}…{formatNumber(spatialBounds.x[1])} · Y {formatNumber(spatialBounds.y[0])}…{formatNumber(spatialBounds.y[1])} · Z {formatNumber(spatialBounds.z[0])}…{formatNumber(spatialBounds.z[1])}</div>
       {(settings.renderType === "field" || mode === "field" || mode === "slice" || mode === "isosurface" || mode === "vector") && (
         <div className="pointer-events-none absolute right-3 top-3 rounded-md border border-[#c6d5df] bg-white/92 px-3 py-2 text-[10px] text-[#567184] shadow-sm">

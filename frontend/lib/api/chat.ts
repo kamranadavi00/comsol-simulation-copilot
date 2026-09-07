@@ -22,6 +22,8 @@ export async function requestAssistantActions(
     coordinates: metadata.dimension === "3D" ? (["x", "y", "z"] as const) : (["x", "y"] as const),
     coordinateColumns: metadata.coordinateColumns,
     availableFields: metadata.fields,
+    pointFields: metadata.mesh?.pointFields ?? metadata.fields,
+    cellFields: metadata.mesh?.cellFields ?? [],
     bounds: metadata.bounds,
   };
   const assistantRequest = aiChatRequestSchema.parse({

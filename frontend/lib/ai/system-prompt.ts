@@ -21,13 +21,13 @@ Rules:
 
 Supported actions:
 - change_field: {"type":"change_field","field":"exact available field"}. Use to change the visualized scalar field.
-- filter: {"type":"filter","field":"exact available field","operator":">|>=|<|<=","value":number}. The Python backend finds matching rows; the frontend highlights only its verified row indexes.
+- filter: {"type":"filter","field":"exact available field","operator":">|>=|<|<=","value":number}. For a real mesh, Python evaluates original point/cell values over the complete dataset, uses connectivity to select cells, and the frontend highlights only those verified mesh cells. Never return node IDs, cell IDs, coordinates, or calculated matches yourself.
 - find_max: {"type":"find_max","field":"exact available field"}. The backend calculates the maximum and its location.
 - find_min: {"type":"find_min","field":"exact available field"}. The backend calculates the minimum and its location.
 - statistics: {"type":"statistics","field":"exact available field"}. Use for min/max/mean/median/standard-deviation or general statistics.
 - create_profile: {"type":"create_profile","field":"exact available field","axis":"x|y|z"}. Only use axes listed in dataset.coordinates.
 - focus_point: {"type":"focus_point","x":number,"y":number,"z"?:number}. Use only when coordinates are explicitly supplied by the user or appear in verifiedResults, and only within dataset bounds.
-- highlight_points: {"type":"highlight_points","rowIndexes":[integer,...]}. Use only with exact row indexes already present in a verified filter result. Never generate row indexes yourself. A filter action already highlights its verified matches automatically, so normally do not add this action.
+- clear_filter: {"type":"clear_filter"}. Remove the current threshold highlight while preserving the loaded dataset and active scalar field. Use for "clear the highlighted region" or "show the full mesh again".
 - reset_view: {"type":"reset_view"}. Use to restore the default visualization.
 
 Examples (replace example fields only with exact names from availableFields):
@@ -38,6 +38,7 @@ Examples (replace example fields only with exact names from availableFields):
 - "Give me statistics for temperature." -> statistics for temperature.
 - "Plot pressure along the X direction." -> create_profile for pressure on axis x.
 - "Switch to pressure and show values below 120000 Pa." -> change_field for pressure, then filter pressure with operator < and value 120000.
+- "Clear the highlighted region." -> clear_filter.
 - "Reset the visualization." -> reset_view.
 - "Find the maximum temperature and focus on that location." -> find_max for temperature only; the executor focuses the verified returned location sequentially.
 
@@ -52,9 +53,9 @@ export function buildAIContextPrompt(request: AIChatRequest): string {
     result.action === "filter"
       ? {
           ...result,
-          rowIndexes: result.rowIndexes.slice(0, 200),
-          returnedRowIndexCount: result.rowIndexes.length,
-          rowIndexesTruncatedForPrompt: result.rowIndexes.length > 200,
+          rowIndexes: (result.rowIndexes ?? []).slice(0, 200),
+          returnedRowIndexCount: result.rowIndexes?.length ?? 0,
+          rowIndexesTruncatedForPrompt: (result.rowIndexes?.length ?? 0) > 200,
         }
       : result,
   );

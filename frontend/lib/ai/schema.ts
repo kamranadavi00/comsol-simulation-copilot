@@ -21,12 +21,7 @@ export const aiActionSchema = z.discriminatedUnion("type", [
     axis: z.enum(["x", "y", "z"]),
   }),
   locationSchema.extend({ type: z.literal("focus_point") }),
-  z
-    .object({
-      type: z.literal("highlight_points"),
-      rowIndexes: z.array(z.number().int().nonnegative()).max(50_000),
-    })
-    .strict(),
+  z.object({ type: z.literal("clear_filter") }).strict(),
   z.object({ type: z.literal("reset_view") }).strict(),
 ]);
 
@@ -66,6 +61,8 @@ export const aiDatasetContextSchema = z
       })
       .strict(),
     availableFields: z.array(z.string().min(1)).min(1).max(200),
+    pointFields: z.array(z.string().min(1)).max(200),
+    cellFields: z.array(z.string().min(1)).max(200),
     bounds: z.partialRecord(z.enum(["x", "y", "z"]), z.tuple([finiteNumber, finiteNumber])),
   })
   .strict();
@@ -125,7 +122,11 @@ export const aiVerifiedResultSchema = z.discriminatedUnion("action", [
       operator: z.enum([">", ">=", "<", "<="]),
       value: finiteNumber,
       matchedCount: z.number().int().nonnegative(),
-      rowIndexes: z.array(z.number().int().nonnegative()).max(50_000),
+      rowIndexes: z.array(z.number().int().nonnegative()).max(50_000).optional(),
+      association: z.enum(["point", "cell"]).optional(),
+      selectionMode: z.enum(["any", "all", "average"]).nullable().optional(),
+      matchedPointCount: z.number().int().nonnegative().optional(),
+      matchedCellCount: z.number().int().nonnegative().optional(),
     })
     .strict(),
   z
@@ -250,17 +251,7 @@ export const aiResponseJsonSchema = {
             { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } },
             ["x", "y"],
           ),
-          actionJsonSchema(
-            "highlight_points",
-            {
-              rowIndexes: {
-                type: "array",
-                maxItems: 50_000,
-                items: { type: "integer", minimum: 0 },
-              },
-            },
-            ["rowIndexes"],
-          ),
+          actionJsonSchema("clear_filter", {}, []),
           actionJsonSchema("reset_view", {}, []),
         ],
       },

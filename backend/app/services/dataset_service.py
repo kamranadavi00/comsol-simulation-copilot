@@ -170,7 +170,7 @@ def register_dataset(payload: bytes, filename: str) -> DatasetMetadata:
     if dataframe.empty:
         raise DatasetValidationError("No rows contain complete coordinate values.")
 
-    fields = mesh.node_fields if mesh else detect_numeric_fields(dataframe, coordinates)
+    fields = list(dict.fromkeys([*mesh.node_fields, *mesh.element_fields])) if mesh else detect_numeric_fields(dataframe, coordinates)
     if not fields:
         raise DatasetValidationError("The mesh must contain at least one numeric node or element result field.")
     dataset_id = str(uuid4())
@@ -240,7 +240,7 @@ def register_dataset_files(files: list[tuple[str, bytes]]) -> DatasetMetadata:
         rowCount=len(dataframe),
         dimension="3D" if coordinates.z else "2D",
         coordinateColumns=coordinates,
-        fields=mesh.node_fields,
+        fields=list(dict.fromkeys([*mesh.node_fields, *mesh.element_fields])),
         bounds=get_bounds(dataframe, coordinates),
         mesh=mesh.statistics,
     )

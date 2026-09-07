@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 
 import ScalarMap2D from "./scalar-map-2d";
-import type { DatasetMetadata, MeshData, MeshSelection, MeshSettings, PointData, Representation, SelectedPoint, VisualizationMode } from "@/types/datasets";
+import type { DatasetMetadata, MeshBounds, MeshData, MeshSelection, MeshSettings, PointData, Representation, SelectedPoint, VisualizationMode } from "@/types/datasets";
 
 const VtkViewer = dynamic(() => import("./vtk-viewer"), {
   ssr: false,
@@ -22,6 +22,8 @@ export function SimulationViewer({
   representation,
   selectedPoint,
   highlightedRowIndexes,
+  highlightedCellIndexes,
+  highlightBounds,
   mesh,
   meshSettings,
   visualizationMode,
@@ -36,6 +38,8 @@ export function SimulationViewer({
   representation: Representation;
   selectedPoint: SelectedPoint | null;
   highlightedRowIndexes: number[];
+  highlightedCellIndexes: number[];
+  highlightBounds: MeshBounds | null;
   mesh: MeshData | null;
   meshSettings: MeshSettings;
   visualizationMode: VisualizationMode;
@@ -45,7 +49,7 @@ export function SimulationViewer({
   onMeshSelect: (selection: MeshSelection | null) => void;
 }) {
   if (mesh) {
-    return <MeshViewer field={field} highlightedNodeIndexes={highlightedRowIndexes} mesh={mesh} mode={visualizationMode} onSelect={onMeshSelect} resetNonce={resetNonce} selection={meshSelection} settings={meshSettings} />;
+    return <MeshViewer field={field} highlightBounds={highlightBounds} highlightedCellIndexes={highlightedCellIndexes} mesh={mesh} mode={visualizationMode} onSelect={onMeshSelect} resetNonce={resetNonce} selection={meshSelection} settings={meshSettings} />;
   }
   return metadata.dimension === "3D" ? (
     <VtkViewer data={data} field={field} highlightedRowIndexes={highlightedRowIndexes} onSelect={onSelect} representation={representation} resetNonce={resetNonce} selectedPoint={selectedPoint} />

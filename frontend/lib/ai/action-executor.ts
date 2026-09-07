@@ -20,7 +20,7 @@ export interface AIActionExecutorContext {
   visualization: AIVisualizationContext;
   changeField: (field: string) => Promise<void>;
   highlightRegion: (threshold: Threshold) => Promise<FilterResult>;
-  highlightPoints: (rowIndexes: number[]) => void;
+  clearFilter: () => void;
   createProfile: (axis: "x" | "y" | "z", field: string) => Promise<ProfileResult>;
   focusLocation: (location: { x: number; y: number; z?: number }) => Promise<NearestPointResult>;
   loadStatistics: (field: string) => Promise<StatisticsResult>;
@@ -54,14 +54,23 @@ export async function executeAIActions(
     }
 
     if (action.type === "filter") {
-      const result = await context.highlightRegion(action);
+      const threshold: Threshold = {
+        field: action.field,
+        operator: action.operator,
+        value: action.value,
+      };
+      const result = await context.highlightRegion(threshold);
       verifiedResults.push({
         action: "filter",
         field: action.field,
         operator: action.operator,
         value: action.value,
         matchedCount: result.matchedCount,
-        rowIndexes: result.rowIndexes,
+        ...(result.rowIndexes ? { rowIndexes: result.rowIndexes } : {}),
+        ...(result.association ? { association: result.association } : {}),
+        ...(result.selectionMode !== undefined ? { selectionMode: result.selectionMode } : {}),
+        ...(result.matchedPointCount !== undefined ? { matchedPointCount: result.matchedPointCount } : {}),
+        ...(result.matchedCellCount !== undefined ? { matchedCellCount: result.matchedCellCount } : {}),
       });
       visualization = {
         ...visualization,
@@ -76,8 +85,13 @@ export async function executeAIActions(
       continue;
     }
 
-    if (action.type === "highlight_points") {
-      context.highlightPoints(action.rowIndexes);
+    if (action.type === "clear_filter") {
+      context.clearFilter();
+      visualization = {
+        ...visualization,
+        threshold: null,
+        highlightedRegion: null,
+      };
       continue;
     }
 
@@ -175,6 +189,12 @@ export function formatVerifiedResults(results: AIVerifiedResult[]): string {
         ].join("\n");
       }
       if (result.action === "filter") {
+        if (result.association) {
+          const mode = result.association === "point" && result.selectionMode
+            ? ` using the **${result.selectionMode.toUpperCase()}** nodal-to-cell rule`
+            : "";
+          return `**${result.matchedCellCount ?? result.matchedCount} mesh elements** match \`${result.field} ${result.operator} ${String(result.value)}\`${mode}. The verified physical region is highlighted in the viewer.`;
+        }
         return `**${result.matchedCount} rows** match \`${result.field} ${result.operator} ${String(result.value)}\`. Verified matches are highlighted in the viewer.`;
       }
       if (result.action === "profile") {

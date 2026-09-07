@@ -3,6 +3,9 @@ export type Representation = "surface" | "points" | "wireframe";
 export type VisualizationMode = "field" | "surface" | "slice" | "isosurface" | "streamlines" | "vector" | "mesh";
 export type MeshRenderType = "wireframe" | "surface" | "volume" | "field";
 export type ThresholdOperator = ">" | ">=" | "<" | "<=" | "==";
+export type MeshFieldAssociation = "point" | "cell";
+export type MeshThresholdSelectionMode = "any" | "all" | "average";
+export type MeshBounds = Record<"x" | "y" | "z", [number, number]>;
 
 export interface CoordinateColumns {
   x: string;
@@ -32,6 +35,8 @@ export interface MeshMetadata {
   meshDimension: "1D" | "2D" | "3D";
   nodeFields: string[];
   elementFields: string[];
+  pointFields: string[];
+  cellFields: string[];
   visualizationTier: "full" | "surface" | "decimated" | "progressive";
 }
 
@@ -151,9 +156,18 @@ export interface FilterResult {
   operator: ThresholdOperator;
   value: number;
   matchedCount: number;
-  returnedCount: number;
-  truncated: boolean;
-  rowIndexes: number[];
+  returnedCount?: number;
+  truncated?: boolean;
+  rowIndexes?: number[];
+  association?: MeshFieldAssociation;
+  selectionMode?: MeshThresholdSelectionMode | null;
+  matchedPointCount?: number;
+  matchedCellCount?: number;
+  matchedPointIndexes?: number[];
+  matchedPointIds?: string[];
+  matchedCellIndexes?: number[];
+  matchedCellIds?: string[];
+  bounds?: MeshBounds | null;
 }
 
 export interface ProfileResult {
